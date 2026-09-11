@@ -1,0 +1,80 @@
+[
+  {
+    "id": "TASK-001",
+    "type": "BOOK_SPEC",
+    "description": "Create and validate book specification",
+    "status": "PENDING",
+    "priority": 1,
+    "workspace": null,
+    "attempts": 0,
+    "dependencies": [],
+    "outputs": {},
+    "errors": [],
+    "created_at": "2026-09-11T00:39:56.477Z",
+    "updated_at": "2026-09-11T00:39:56.477Z"
+  },
+  {
+    "id": "TASK-002",
+    "type": "PAGE_CONCEPTS",
+    "description": "Generate 5 unique page concepts",
+    "status": "PENDING",
+    "priority": 2,
+    "workspace": null,
+    "attempts": 0,
+    "dependencies": [
+      "TASK-001"
+    ],
+    "outputs": {},
+    "errors": [],
+    "created_at": "2026-09-11T00:39:56.478Z",
+    "updated_at": "2026-09-11T00:39:56.478Z"
+  },
+  {
+    "id": "TASK-003",
+    "type": "PROMPT_GEN",
+    "description": "Generate 5 high-quality line art prompts",
+    "status": "PENDING",
+    "priority": 3,
+    "workspace": null,
+    "attempts": 0,
+    "dependencies": [
+      "TASK-002"
+    ],
+    "outputs": {},
+    "errors": [],
+    "created_at": "2026-09-11T00:39:56.478Z",
+    "updated_at": "2026-09-11T00:39:56.478Z"
+  },
+  {
+    "id": "TASK-004",
+    "type": "ILLUSTRATIONS",
+    "description": "Collect and generate 5 coloring illustrations",
+    "status": "PENDING",
+    "priority": 4,
+    "workspace": null,
+    "attempts": 0,
+    "dependencies": [
+      "TASK-003"
+    ],
+    "outputs": {},
+    "errors": [],
+    "created_at": "2026-09-11T00:39:56.478Z",
+    "updated_at": "2026-09-11T00:39:56.478Z"
+  },
+  {
+    "id": "TASK-005",
+    "type": "VALIDATION",
+    "description": "Run automated image validation & color detection",
+    "status": "PENDING",
+    "priority": 5,
+    "workspace": null,
+    "attempts": 0,
+    "dependencies": [
+      "TASK-004"
+    ],
+    "outputs": {},
+    "errors": [],
+    "created_at": "2026-09-11T00:39:56.478Z",
+    "updated_at": "2026-09-11T00:39:56.478Z"
+  }
+]
