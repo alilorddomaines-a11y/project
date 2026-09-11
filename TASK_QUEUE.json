@@ -3,15 +3,17 @@
     "id": "TASK-001",
     "type": "BOOK_SPEC",
     "description": "Create and validate book specification",
-    "status": "PENDING",
+    "status": "SUCCESS",
     "priority": 1,
-    "workspace": null,
+    "workspace": "WS01",
     "attempts": 0,
     "dependencies": [],
-    "outputs": {},
+    "outputs": {
+      "result": "[Simulation] Completed TASK-001 on WS01\n[[TASK_DONE]]"
+    },
     "errors": [],
     "created_at": "2026-09-11T00:43:49.156Z",
-    "updated_at": "2026-09-11T00:43:49.156Z"
+    "updated_at": "2026-09-11T00:43:49.776Z"
   },
   {
     "id": "TASK-002",
