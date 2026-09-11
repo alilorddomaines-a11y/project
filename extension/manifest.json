@@ -1,8 +1,8 @@
-﻿{
+{
   "manifest_version": 3,
   "name": "KDP Coloring Book Factory",
   "version": "1.0.0",
-  "description": "Production factory for Amazon KDP coloring books with 15-workspace Lovable rotation, canonical GitHub state, and PPTX output.",
+  "description": "Production factory for Amazon KDP coloring books with 20-workspace Lovable rotation, canonical GitHub state, and PPTX output.",
   "permissions": [
     "storage",
     "tabs",

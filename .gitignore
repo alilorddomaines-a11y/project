@@ -18,3 +18,8 @@ languages.py
 render_reference_frames.py
 requirements.txt
 utils.py
+extension/workspaces/
+extension/tasks/
+extension/lovable/
+extension/state/
+extension/kdp/
