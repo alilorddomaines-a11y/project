@@ -220,9 +220,25 @@ $('#btnResetTestRun')?.addEventListener('click', async () => {
   }
 });
 
-// Create Book Form with deterministic BookSpec validation
-$('#createBookForm')?.addEventListener('submit', async (e) => {
-  e.preventDefault();
+function addLocalLog(message, type = 'info', eventType = 'INFO') {
+  const entry = {
+    time: new Date().toLocaleTimeString(),
+    type,
+    event: eventType,
+    message
+  };
+  currentData.logs = currentData.logs || [];
+  currentData.logs.unshift(entry);
+  if (currentData.logs.length > 250) currentData.logs.pop();
+  renderLogs();
+}
+
+async function handleCreateBookSubmit(e) {
+  if (e && e.preventDefault) e.preventDefault();
+
+  console.log('[CREATE_BOOK] button clicked');
+  addLocalLog('[CREATE_BOOK] button clicked', 'info', 'CREATE_BOOK');
+
   const errBox = $('#specErrorsContainer');
   if (errBox) {
     errBox.style.display = 'none';
@@ -230,52 +246,95 @@ $('#createBookForm')?.addEventListener('submit', async (e) => {
   }
 
   const rawFormData = {
-    book_title: $('#bookTitle').value.trim(),
-    subtitle: $('#bookSubtitle').value.trim(),
-    language: $('#bookLanguage').value,
-    target_age: $('#targetAge').value,
-    theme: $('#theme').value.trim(),
-    page_count: $('#pageCount').value,
-    trim_size: $('#trimSize').value,
-    orientation: $('#orientation').value,
-    bleed: $('#bleed').value,
-    complexity: $('#complexity').value,
-    style: $('#style').value,
-    background: $('#background').value,
-    blank_back_pages: $('#chkBlankBacks').checked,
-    page_numbering: $('#chkPageNumbers').checked,
+    book_title: $('#bookTitle')?.value?.trim() || '',
+    subtitle: $('#bookSubtitle')?.value?.trim() || '',
+    language: $('#bookLanguage')?.value || 'en',
+    target_age: $('#targetAge')?.value || '4-8',
+    theme: $('#theme')?.value?.trim() || '',
+    page_count: $('#pageCount')?.value || '10',
+    trim_size: $('#trimSize')?.value || '8.5x11',
+    orientation: $('#orientation')?.value || 'PORTRAIT',
+    bleed: $('#bleed')?.value || 'NO_BLEED',
+    complexity: $('#complexity')?.value || 'SIMPLE',
+    style: $('#style')?.value || 'CLEAN_LINE_ART',
+    background: $('#background')?.value || 'WHITE',
+    blank_back_pages: $('#chkBlankBacks')?.checked ?? true,
+    page_numbering: $('#chkPageNumbers')?.checked ?? false,
     front_matter: {
-      title_page: $('#chkTitlePage').checked,
-      copyright_page: $('#chkCopyrightPage').checked,
-      introduction_page: $('#chkIntroPage').checked,
-      instructions_page: $('#chkInstructionsPage').checked
+      title_page: $('#chkTitlePage')?.checked ?? true,
+      copyright_page: $('#chkCopyrightPage')?.checked ?? true,
+      introduction_page: $('#chkIntroPage')?.checked ?? true,
+      instructions_page: $('#chkInstructionsPage')?.checked ?? false
     },
     activity_pages: {
-      enabled: $('#chkActivityPages').checked,
-      count: Number($('#activityPagesCount').value) || 0
+      enabled: $('#chkActivityPages')?.checked ?? false,
+      count: Number($('#activityPagesCount')?.value) || 0
     }
   };
 
   try {
+    console.log('[CREATE_BOOK] validation started');
+    addLocalLog('[CREATE_BOOK] validation started', 'info', 'CREATE_BOOK');
+
     // Validated, normalized, deterministic BookSpec
     const spec = BookSpec.create(rawFormData);
+    console.log('[CREATE_BOOK] BookSpec created:', spec.book_title);
+    addLocalLog(`[CREATE_BOOK] BookSpec created: "${spec.book_title}"`, 'info', 'CREATE_BOOK');
+
+    // Immediate visual state change on dashboard to guarantee no silent freezes
+    $('#statBookTitle').textContent = spec.book_title;
+    $('#activeProjectPill').textContent = 'INITIALIZING';
+    $('#infoStatus').textContent = 'INITIALIZING';
+    $('#statWorkspace').textContent = 'WS01';
+
+    const driverType = $('#driverSelect')?.value || currentData.driverType || 'browser';
+    console.log('[CREATE_BOOK] sending START_PROJECT to service worker with driver:', driverType);
+    addLocalLog(`[CREATE_BOOK] sending START_PROJECT with driver: ${driverType}`, 'info', 'CREATE_BOOK');
 
     if (typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
-      await chrome.runtime.sendMessage({ type: 'START_PROJECT', spec: spec.toJSON() });
-      $$('.nav-item')[0].click(); // Switch to dashboard view
-      fetchData();
+      const res = await chrome.runtime.sendMessage({
+        type: 'START_PROJECT',
+        spec: spec.toJSON(),
+        driverType
+      });
+
+      console.log('[CREATE_BOOK] service worker response:', res);
+      if (!res || !res.ok) {
+        throw new Error(res?.error || 'Background service worker failed to start project.');
+      }
+
+      // Switch to dashboard view
+      $$('.nav-item')[0].click();
+      await fetchData();
+    } else {
+      throw new Error('Chrome runtime extension messaging not available in this window.');
     }
   } catch (err) {
+    console.error('[ERROR] [CREATE_BOOK]', err);
+    addLocalLog(`[ERROR] [CREATE_BOOK] ${err.message}`, 'error', 'ERROR');
+
     if (errBox) {
       errBox.style.display = 'block';
       if (err.validation?.errors) {
         errBox.innerHTML = `<strong>Specification Errors:</strong><ul style="margin: 6px 0 0 18px;">${err.validation.errors.map(e => `<li>${e.message}</li>`).join('')}</ul>`;
       } else {
-        errBox.textContent = err.message;
+        errBox.innerHTML = `<strong>Error:</strong> ${err.message}`;
       }
     }
+    alert(`Create Book Failed:\n${err.message}`);
+  }
+}
+
+// Create Book Form with deterministic BookSpec validation
+$('#createBookForm')?.addEventListener('submit', handleCreateBookSubmit);
+$('#btnSubmitCreateBook')?.addEventListener('click', (e) => {
+  // If the button is clicked outside standard submit event, trigger submission
+  const form = $('#createBookForm');
+  if (form && !form.checkValidity()) {
+    form.reportValidity();
   }
 });
+
 
 // Save Workspaces
 $('#btnSaveWorkspaces')?.addEventListener('click', async () => {

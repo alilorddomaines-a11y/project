@@ -20,9 +20,15 @@
       'textarea[placeholder*="Ask" i]',
       'textarea[placeholder*="prompt" i]',
       'textarea[placeholder*="message" i]',
+      'textarea[placeholder*="what" i]',
+      'textarea[placeholder*="build" i]',
+      'textarea[placeholder*="type" i]',
+      'textarea[data-testid*="chat" i]',
       'div[contenteditable="true"][role="textbox"]',
       'div[contenteditable="true"]',
+      '[role="textbox"]',
       'form textarea',
+      'main textarea',
       'textarea'
     ];
 
@@ -37,12 +43,13 @@
 
   function findSendButton() {
     const input = findChatInput();
-    const container = input ? input.closest('form, div:has(textarea)') : document;
+    const container = input ? input.closest('form, div:has(textarea), div:has([role="textbox"])') : document;
 
     const candidates = [
       'button[type="submit"]',
       'button[aria-label*="send" i]',
       'button[title*="send" i]',
+      'button[data-testid*="send" i]',
       'button:has(svg[data-icon="send"])',
       'button:has(svg)'
     ];
@@ -58,7 +65,7 @@
 
   function isGenerating() {
     // Check for visible stop/pause generation button
-    const stopBtn = document.querySelector('button[aria-label*="stop" i], button[title*="stop" i]');
+    const stopBtn = document.querySelector('button[aria-label*="stop" i], button[title*="stop" i], button[data-testid*="stop" i]');
     return !!(stopBtn && stopBtn.offsetParent !== null);
   }
 
@@ -69,13 +76,20 @@
       sel.selectAllChildren(el);
       sel.collapseToEnd();
       document.execCommand('insertText', false, text);
+      el.dispatchEvent(new Event('input', { bubbles: true }));
       return;
     }
     const proto = el instanceof HTMLTextAreaElement
       ? HTMLTextAreaElement.prototype
       : HTMLInputElement.prototype;
-    Object.getOwnPropertyDescriptor(proto, 'value').set.call(el, text);
+    const setter = Object.getOwnPropertyDescriptor(proto, 'value')?.set;
+    if (setter) {
+      setter.call(el, text);
+    } else {
+      el.value = text;
+    }
     el.dispatchEvent(new Event('input', { bubbles: true }));
+    el.dispatchEvent(new Event('change', { bubbles: true }));
   }
 
   async function sendPrompt(text) {

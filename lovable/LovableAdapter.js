@@ -1,4 +1,4 @@
-﻿/**
+/**
  * lovable/LovableAdapter.js
  * Unified facade isolating the orchestrator from underlying driver details.
  */
@@ -19,11 +19,14 @@ export class LovableAdapter {
   }
 
   initDriver() {
-    switch (this.driverType) {
+    const norm = String(this.driverType || '').trim().toLowerCase();
+    switch (norm) {
       case 'mcp':
         this.driver = new MCPDriver(this.options);
         break;
       case 'browser':
+      case 'edge_browser':
+      case 'edgebrowser':
         this.driver = new EdgeBrowserDriver(this.options);
         break;
       case 'simulation':

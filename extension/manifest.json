@@ -8,9 +8,11 @@
     "tabs",
     "sidePanel",
     "scripting",
-    "activeTab"
+    "activeTab",
+    "alarms"
   ],
   "host_permissions": [
+    "*://*.lovable.dev/*",
     "https://lovable.dev/*",
     "http://127.0.0.1:*/*"
   ],
@@ -20,7 +22,10 @@
   },
   "content_scripts": [
     {
-      "matches": ["https://lovable.dev/*"],
+      "matches": [
+        "*://*.lovable.dev/*",
+        "https://lovable.dev/*"
+      ],
       "js": ["content/lovable_bridge.js"],
       "run_at": "document_idle",
       "all_frames": false

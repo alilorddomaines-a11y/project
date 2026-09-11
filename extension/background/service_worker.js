@@ -21,13 +21,24 @@ let logs = [];
 let isRunning = false;
 let isPaused = false;
 let executionLock = false; // Concurrency guard against duplicate loops
+let initPromise = null;
+
+async function ensureInitialized() {
+  if (!initPromise) {
+    initPromise = loadInitialConfiguration();
+  }
+  return initPromise;
+}
 
 chrome.runtime.onInstalled.addListener(() => {
   if (chrome.sidePanel?.setPanelBehavior) {
     chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
   }
-  loadInitialConfiguration();
+  ensureInitialized();
 });
+
+// Top-level initialization on every service worker wake-up
+ensureInitialized().catch(err => console.error('[ERROR] Service worker initialization failed:', err));
 
 chrome.action.onClicked.addListener((tab) => {
   if (chrome.sidePanel?.open) {
@@ -50,8 +61,8 @@ async function loadInitialConfiguration() {
     : createDefault20Workspaces();
   workspaceManager = new WorkspaceManager(wsList);
 
-  // 2. Lovable adapter setup
-  adapter = new LovableAdapter(stored.driverType || 'simulation');
+  // 2. Lovable adapter setup with logging callback
+  adapter = new LovableAdapter(stored.driverType || 'simulation', { onLog: addLog });
 
   // 3. TaskQueue and ProjectState restoration
   if (stored.projectState && stored.taskQueue) {
@@ -108,19 +119,39 @@ async function saveState() {
 }
 
 async function runExecutionLoop() {
-  // Concurrency lock prevents duplicate loops
-  if (executionLock || isRunning) return;
+  // Concurrency guard: prevent duplicate loops
+  if (executionLock) {
+    console.log('[ORCHESTRATOR] Execution lock already held; skipping duplicate runExecutionLoop call.');
+    return;
+  }
   executionLock = true;
   isRunning = true;
+  isPaused = false;
 
-  addLog('Execution loop acquired lock and started.', 'info', 'TASK_STARTED');
+  console.log('[ORCHESTRATOR] execution started');
+  addLog('[ORCHESTRATOR] execution started', 'info', 'ORCHESTRATOR');
+
+  if (typeof chrome !== 'undefined' && chrome.alarms?.create) {
+    try {
+      chrome.alarms.create('factory-watchdog', { periodInMinutes: 1 });
+    } catch (e) {}
+  }
 
   try {
     while (isRunning && !isPaused) {
-      if (!activeProject || !taskQueue || !workspaceManager) break;
+      if (!activeProject || !taskQueue || !workspaceManager) {
+        console.warn('[ORCHESTRATOR] Missing activeProject, taskQueue, or workspaceManager. Exiting loop.');
+        break;
+      }
 
       const currentWs = workspaceManager.getWorkspace(activeProject.current_workspace);
-      if (!currentWs) break;
+      if (!currentWs) {
+        addLog(`[ERROR] Workspace ${activeProject.current_workspace} not found.`, 'error', 'WORKSPACE_ERROR');
+        break;
+      }
+
+      addLog(`[WORKSPACE] ${currentWs.id} selected`, 'info', 'WORKSPACE');
+      console.log(`[WORKSPACE] ${currentWs.id} selected`);
 
       // 1. Evaluate canContinue capability
       const canContinue = await adapter.canContinue(currentWs);
@@ -154,6 +185,7 @@ async function runExecutionLoop() {
         const remaining = taskQueue.getAllTasks().filter(t => t.status !== 'SUCCESS' && t.status !== 'SKIPPED').length;
         if (remaining === 0) {
           activeProject.status = PROJECT_STATUS.SUCCESS;
+          activeProject.current_task = null;
           addLog('All tasks successfully completed!', 'success', 'TASK_COMPLETED');
         }
         isRunning = false;
@@ -167,7 +199,8 @@ async function runExecutionLoop() {
       activeProject.status = PROJECT_STATUS.RUNNING;
       await saveState();
 
-      addLog(`Running ${task.id}: "${task.description}" on ${currentWs.id}...`, 'info', 'TASK_STARTED');
+      addLog(`[TASK] ${task.id} started: "${task.description}" on ${currentWs.id}...`, 'info', 'TASK');
+      console.log(`[TASK] ${task.id} started`);
 
       const prompt = PromptBuilder.buildContinuationPrompt({
         projectTitle: activeProject.book_title,
@@ -177,16 +210,27 @@ async function runExecutionLoop() {
         pendingTasks: activeProject.pending_tasks
       });
 
+      addLog(`[LOVABLE] adapter invoked with driver: ${adapter.getDriverName()}`, 'info', 'LOVABLE');
+      console.log(`[LOVABLE] adapter invoked with driver: ${adapter.getDriverName()}`);
+
       try {
-        const result = await adapter.sendPrompt(prompt, { taskId: task.id, workspaceId: currentWs.id });
+        const result = await adapter.sendPrompt(prompt, {
+          taskId: task.id,
+          workspaceId: currentWs.id,
+          workspace: currentWs
+        });
+
         taskQueue.markSuccess(task.id, { output: result.output });
         if (!activeProject.completed_tasks.includes(task.id)) {
           activeProject.completed_tasks.push(task.id);
         }
         activeProject.pending_tasks = activeProject.pending_tasks.filter(id => id !== task.id);
         addLog(`Task ${task.id} succeeded on ${currentWs.id}.`, 'success', 'TASK_COMPLETED');
+        console.log(`Task ${task.id} succeeded on ${currentWs.id}.`);
         await saveState();
       } catch (err) {
+        console.error(`[ERROR] Task execution error on ${currentWs.id}:`, err);
+
         if (err.isContinuationLimit) {
           addLog(`Legitimate limit reached on ${currentWs.id} during ${task.id}. Preserving task and rotating.`, 'warn', 'WORKSPACE_LIMIT_DETECTED');
           task.status = 'PENDING'; // Preserve task
@@ -213,14 +257,17 @@ async function runExecutionLoop() {
 
         if (err.isBrowserError) {
           task.status = 'PENDING'; // Preserve task for retry
-          addLog(`Browser transport/DOM error on ${currentWs.id}: ${err.message}. Workspace NOT disabled.`, 'warn', 'BROWSER_ERROR');
+          addLog(`[ERROR] Browser transport/DOM error on ${currentWs.id}: ${err.message}. Workspace NOT disabled.`, 'warn', 'BROWSER_ERROR');
+          // Pause execution safely so user can address browser state without infinite retry churn
+          isPaused = true;
+          isRunning = false;
+          if (activeProject) activeProject.status = PROJECT_STATUS.PAUSED;
           await saveState();
-          await new Promise(r => setTimeout(r, 2000));
-          continue;
+          break;
         }
 
         taskQueue.markFailed(task.id, err.message);
-        addLog(`Task ${task.id} failed: ${err.message}`, 'error', 'TASK_FAILED');
+        addLog(`[ERROR] Task ${task.id} failed: ${err.message}`, 'error', 'TASK_FAILED');
         await saveState();
       }
 
@@ -229,102 +276,153 @@ async function runExecutionLoop() {
   } finally {
     isRunning = false;
     executionLock = false;
+    if (typeof chrome !== 'undefined' && chrome.alarms?.clear) {
+      try {
+        chrome.alarms.clear('factory-watchdog');
+      } catch (e) {}
+    }
     await saveState();
   }
 }
 
 chrome.runtime.onMessage.addListener((msg, sender, respond) => {
   (async () => {
-    if (!workspaceManager) await loadInitialConfiguration();
+    try {
+      await ensureInitialized();
 
-    switch (msg.type) {
-      case 'GET_DATA':
-        respond({
-          state: activeProject,
-          tasks: taskQueue ? taskQueue.getAllTasks() : [],
-          workspaces: workspaceManager ? workspaceManager.getAllWorkspaces() : [],
-          isExhausted: workspaceManager ? workspaceManager.isExhausted() : false,
-          logs,
-          driverType: adapter?.driverType || 'simulation',
-          isRunning,
-          isPaused
-        });
-        break;
+      switch (msg.type) {
+        case 'GET_DATA':
+          respond({
+            state: activeProject,
+            tasks: taskQueue ? taskQueue.getAllTasks() : [],
+            workspaces: workspaceManager ? workspaceManager.getAllWorkspaces() : [],
+            isExhausted: workspaceManager ? workspaceManager.isExhausted() : false,
+            logs,
+            driverType: adapter?.driverType || 'browser',
+            isRunning,
+            isPaused
+          });
+          break;
 
-      case 'START_PROJECT': {
-        const pageCount = Number(msg.spec?.page_count) || Number(msg.spec?.pages) || 10;
-        const tasks = createStandardMilestoneTasks(pageCount);
-        activeProject = createInitialState(msg.spec, tasks, 'WS01');
-        activeProject.status = PROJECT_STATUS.RUNNING;
-        activeProject.rotation_index = 1;
-        taskQueue = new TaskQueue(tasks);
-        isPaused = false;
-        isRunning = true;
-        addLog(`Book project created: "${activeProject.book_title}" (${pageCount} coloring pages)`, 'info', 'BOOK_CREATED');
-        await saveState();
-        runExecutionLoop();
-        respond({ ok: true, state: activeProject });
-        break;
+        case 'START_PROJECT': {
+          console.log('[CREATE_BOOK] message received by service worker:', msg);
+
+          // Configure driver
+          const targetDriver = msg.driverType || 'browser';
+          adapter.setDriver(targetDriver, { onLog: addLog });
+          await chrome.storage.local.set({ driverType: targetDriver });
+
+          addLog(`ACTIVE_DRIVER = ${adapter.getDriverName()}`, 'info', 'DRIVER_SELECTED');
+          addLog(`ACTUAL_DRIVER = ${adapter.getDriverName()}`, 'info', 'DRIVER_SELECTED');
+          console.log(`ACTIVE_DRIVER = ${adapter.getDriverName()}`);
+          console.log(`ACTUAL_DRIVER = ${adapter.getDriverName()}`);
+
+          const pageCount = Number(msg.spec?.page_count) || Number(msg.spec?.pages) || 1;
+          const tasks = createStandardMilestoneTasks(pageCount);
+
+          activeProject = createInitialState(msg.spec, tasks, 'WS01');
+          activeProject.status = PROJECT_STATUS.RUNNING;
+          activeProject.rotation_index = 1;
+          taskQueue = new TaskQueue(tasks);
+
+          isPaused = false;
+          // Notice: do NOT set isRunning = true before runExecutionLoop acquires executionLock!
+
+          addLog('[CREATE_BOOK] state persisted', 'info', 'CREATE_BOOK');
+          addLog('[CREATE_BOOK] task queue created', 'info', 'CREATE_BOOK');
+          addLog('[CREATE_BOOK] orchestrator initialized', 'info', 'CREATE_BOOK');
+          addLog(`Book project created: "${activeProject.book_title}" (${pageCount} coloring pages)`, 'info', 'BOOK_CREATED');
+
+          await saveState();
+
+          // Respond immediately to dashboard so UI updates
+          respond({ ok: true, state: activeProject, driver: adapter.getDriverName() });
+
+          // Start execution loop
+          runExecutionLoop().catch(err => {
+            console.error('[ERROR] Unhandled error in runExecutionLoop:', err);
+            addLog(`[ERROR] Unhandled runExecutionLoop error: ${err.message}`, 'error', 'TASK_FAILED');
+          });
+          break;
+        }
+
+        case 'PAUSE_PROJECT':
+          isPaused = true;
+          isRunning = false;
+          if (activeProject) activeProject.status = PROJECT_STATUS.PAUSED;
+          addLog('Factory paused by user', 'warn', 'PROJECT_PAUSED');
+          await saveState();
+          respond({ ok: true });
+          break;
+
+        case 'RESUME_PROJECT':
+          isPaused = false;
+          if (activeProject) activeProject.status = PROJECT_STATUS.RUNNING;
+          addLog('Factory resumed', 'info', 'INFO');
+          await saveState();
+          runExecutionLoop().catch(() => {});
+          respond({ ok: true });
+          break;
+
+        case 'STOP_PROJECT':
+          isPaused = false;
+          isRunning = false;
+          if (activeProject) activeProject.status = PROJECT_STATUS.STOPPED;
+          addLog('Factory stopped', 'error', 'PROJECT_STOPPED');
+          await saveState();
+          respond({ ok: true });
+          break;
+
+        case 'RESET_TEST_RUN':
+          isPaused = false;
+          isRunning = false;
+          activeProject = null;
+          taskQueue = null;
+          if (workspaceManager) workspaceManager.resetRunStatuses();
+          logs = [];
+          await chrome.storage.local.remove(['projectState', 'taskQueue', 'factoryStatus']);
+          await chrome.storage.local.set({ workspaces: workspaceManager ? workspaceManager.toJSON() : [] });
+          addLog('Factory test run reset safely. Canonical Git history preserved.', 'info', 'INFO');
+          respond({ ok: true });
+          break;
+
+        case 'SET_DRIVER':
+          adapter.setDriver(msg.driverType, { onLog: addLog, ...(msg.options || {}) });
+          await chrome.storage.local.set({ driverType: msg.driverType });
+          addLog(`ACTIVE_DRIVER = ${adapter.getDriverName()}`, 'info', 'DRIVER_SELECTED');
+          addLog(`ACTUAL_DRIVER = ${adapter.getDriverName()}`, 'info', 'DRIVER_SELECTED');
+          respond({ ok: true, driver: adapter.getDriverName() });
+          break;
+
+        case 'UPDATE_WORKSPACES':
+          workspaceManager = new WorkspaceManager(msg.workspaces);
+          await chrome.storage.local.set({ workspaces: msg.workspaces });
+          addLog('20-Workspace configuration updated', 'info', 'INFO');
+          respond({ ok: true });
+          break;
+
+        default:
+          respond({ ok: false, error: `Unknown message type: ${msg.type}` });
       }
-
-      case 'PAUSE_PROJECT':
-        isPaused = true;
-        isRunning = false;
-        if (activeProject) activeProject.status = PROJECT_STATUS.PAUSED;
-        addLog('Factory paused by user', 'warn', 'PROJECT_PAUSED');
-        await saveState();
-        respond({ ok: true });
-        break;
-
-      case 'RESUME_PROJECT':
-        isPaused = false;
-        if (activeProject) activeProject.status = PROJECT_STATUS.RUNNING;
-        addLog('Factory resumed', 'info', 'INFO');
-        await saveState();
-        runExecutionLoop();
-        respond({ ok: true });
-        break;
-
-      case 'STOP_PROJECT':
-        isPaused = false;
-        isRunning = false;
-        if (activeProject) activeProject.status = PROJECT_STATUS.STOPPED;
-        addLog('Factory stopped', 'error', 'PROJECT_STOPPED');
-        await saveState();
-        respond({ ok: true });
-        break;
-
-      case 'RESET_TEST_RUN':
-        isPaused = false;
-        isRunning = false;
-        activeProject = null;
-        taskQueue = null;
-        if (workspaceManager) workspaceManager.resetRunStatuses();
-        logs = [];
-        await chrome.storage.local.remove(['projectState', 'taskQueue', 'factoryStatus']);
-        await chrome.storage.local.set({ workspaces: workspaceManager ? workspaceManager.toJSON() : [] });
-        addLog('Factory test run reset safely. Canonical Git history preserved.', 'info', 'INFO');
-        respond({ ok: true });
-        break;
-
-      case 'SET_DRIVER':
-        adapter.setDriver(msg.driverType, msg.options || {});
-        await chrome.storage.local.set({ driverType: msg.driverType });
-        addLog(`Driver switched to: ${adapter.getDriverName()}`, 'info', 'INFO');
-        respond({ ok: true, driver: adapter.getDriverName() });
-        break;
-
-      case 'UPDATE_WORKSPACES':
-        workspaceManager = new WorkspaceManager(msg.workspaces);
-        await chrome.storage.local.set({ workspaces: msg.workspaces });
-        addLog('20-Workspace configuration updated', 'info', 'INFO');
-        respond({ ok: true });
-        break;
-
-      default:
-        respond({ ok: false, error: 'Unknown message type' });
+    } catch (msgErr) {
+      console.error('[ERROR] onMessage error:', msgErr);
+      addLog(`[ERROR] Service worker message error: ${msgErr.message}`, 'error', 'ERROR');
+      respond({ ok: false, error: msgErr.message });
     }
   })();
   return true;
 });
+
+// Watchdog alarm handler for MV3 lifecycle resilience
+if (typeof chrome !== 'undefined' && chrome.alarms?.onAlarm) {
+  chrome.alarms.onAlarm.addListener(async (alarm) => {
+    if (alarm.name === 'factory-watchdog') {
+      await ensureInitialized();
+      if (activeProject && activeProject.status === PROJECT_STATUS.RUNNING && !isPaused && !isRunning && !executionLock) {
+        console.log('[WATCHDOG] Resuming execution after service worker wake-up');
+        runExecutionLoop().catch(() => {});
+      }
+    }
+  });
+}
 
