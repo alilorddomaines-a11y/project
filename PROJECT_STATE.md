@@ -3,18 +3,18 @@
 - **Project ID**: `kdp_sim_001`
 - **Status**: `RUNNING`
 - **Phase**: `BOOK_SPEC`
-- **Active Workspace**: `WS01`
-- **Current Task**: `TASK-001`
-- **Progress**: 20% (1/5 tasks completed)
-- **Last Commit**: `22cfd5f14e02e8be782aeacb9cbd8494e65e9cc2`
-- **Last Operation**: Workspace WS01 limit reached — Handover initiated
-- **Timestamp**: 2026-09-11T00:43:50.332Z
+- **Active Workspace**: `WS02`
+- **Current Task**: `TASK-002`
+- **Progress**: 40% (2/5 tasks completed)
+- **Last Commit**: `aaed7547293c1f9d4a549adec77832de30a09160`
+- **Last Operation**: Task TASK-002 SUCCESS on WS02
+- **Timestamp**: 2026-09-11T00:43:50.825Z
 
 ## Completed Tasks
 - **TASK-001**
+- **TASK-002**
 
 ## Pending Tasks
-- TASK-002
 - TASK-003
 - TASK-004
 - TASK-005

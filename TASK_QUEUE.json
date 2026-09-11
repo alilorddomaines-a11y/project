@@ -19,17 +19,19 @@
     "id": "TASK-002",
     "type": "PAGE_CONCEPTS",
     "description": "Generate 5 unique page concepts",
-    "status": "PENDING",
+    "status": "SUCCESS",
     "priority": 2,
-    "workspace": null,
+    "workspace": "WS02",
     "attempts": 0,
     "dependencies": [
       "TASK-001"
     ],
-    "outputs": {},
+    "outputs": {
+      "result": "[Simulation] Completed TASK-002 on WS02\n[[TASK_DONE]]"
+    },
     "errors": [],
     "created_at": "2026-09-11T00:43:49.158Z",
-    "updated_at": "2026-09-11T00:43:49.158Z"
+    "updated_at": "2026-09-11T00:43:50.825Z"
   },
   {
     "id": "TASK-003",
