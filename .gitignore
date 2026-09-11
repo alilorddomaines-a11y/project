@@ -9,3 +9,12 @@ gcm-diagnose.log
 push_out.txt
 tests/.sim_workspace/
 tests/sandbox/
+chrome.py
+components.py
+config.py
+fonts.py
+fonts_doctor.py
+languages.py
+render_reference_frames.py
+requirements.txt
+utils.py

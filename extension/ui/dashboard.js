@@ -1,7 +1,10 @@
 ﻿/**
  * extension/ui/dashboard.js
  * Interactive controller for KDP Coloring Book Factory dashboard.
+ * Uses the canonical BookSpec engine for deterministic specification creation.
  */
+
+import { BookSpec } from '../../kdp/BookSpec.js';
 
 const $ = s => document.querySelector(s);
 const $$ = s => document.querySelectorAll(s);
@@ -40,7 +43,7 @@ async function fetchData() {
       }
     }
   } catch (e) {
-    console.warn('Direct extension messaging unavailable; using local simulation cache', e);
+    console.warn('Direct extension messaging unavailable; using local cache', e);
   }
 }
 
@@ -177,26 +180,60 @@ $('#btnStop')?.addEventListener('click', async () => {
   }
 });
 
-// Create Book Form
+// Create Book Form with deterministic BookSpec validation
 $('#createBookForm')?.addEventListener('submit', async (e) => {
   e.preventDefault();
-  const spec = {
-    title: $('#bookTitle').value.trim(),
+  const errBox = $('#specErrorsContainer');
+  if (errBox) {
+    errBox.style.display = 'none';
+    errBox.innerHTML = '';
+  }
+
+  const rawFormData = {
+    book_title: $('#bookTitle').value.trim(),
     subtitle: $('#bookSubtitle').value.trim(),
     language: $('#bookLanguage').value,
-    targetAge: $('#targetAge').value,
-    pages: parseInt($('#pageCount').value, 10) || 10,
-    trimSize: $('#trimSize').value,
-    blankBacks: $('#chkBlankBacks').checked,
-    frontMatter: $('#chkFrontMatter').checked,
+    target_age: $('#targetAge').value,
     theme: $('#theme').value.trim(),
-    complexity: $('#complexity').value
+    page_count: $('#pageCount').value,
+    trim_size: $('#trimSize').value,
+    orientation: $('#orientation').value,
+    bleed: $('#bleed').value,
+    complexity: $('#complexity').value,
+    style: $('#style').value,
+    background: $('#background').value,
+    blank_back_pages: $('#chkBlankBacks').checked,
+    page_numbering: $('#chkPageNumbers').checked,
+    front_matter: {
+      title_page: $('#chkTitlePage').checked,
+      copyright_page: $('#chkCopyrightPage').checked,
+      introduction_page: $('#chkIntroPage').checked,
+      instructions_page: $('#chkInstructionsPage').checked
+    },
+    activity_pages: {
+      enabled: $('#chkActivityPages').checked,
+      count: Number($('#activityPagesCount').value) || 0
+    }
   };
 
-  if (typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
-    await chrome.runtime.sendMessage({ type: 'START_PROJECT', spec });
-    $$('.nav-item')[0].click(); // Go to dashboard tab
-    fetchData();
+  try {
+    // Validated, normalized, deterministic BookSpec
+    const spec = BookSpec.create(rawFormData);
+
+    if (typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
+      await chrome.runtime.sendMessage({ type: 'START_PROJECT', spec: spec.toJSON() });
+      $$('.nav-item')[0].click(); // Switch to dashboard view
+      fetchData();
+    }
+  } catch (err) {
+    if (errBox) {
+      errBox.style.display = 'block';
+      if (err.validation?.errors) {
+        errBox.innerHTML = `<strong>Specification Errors:</strong><ul style="margin: 6px 0 0 18px;">${err.validation.errors.map(e => `<li>${e.message}</li>`).join('')}</ul>`;
+      } else {
+        errBox.textContent = err.message;
+      }
+    }
   }
 });
 

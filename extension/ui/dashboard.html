@@ -133,6 +133,8 @@
       <section id="tab-create-book" class="tab-pane">
         <div class="card form-card">
           <h3>Create New Coloring Book Specification</h3>
+          <p class="section-desc">Configure the deterministic KDP Book Specification. This becomes the single source of truth for prompts, assets, layout, and PPTX generation.</p>
+          <div id="specErrorsContainer" style="display: none; margin-bottom: 16px; padding: 12px; background: rgba(239, 68, 68, 0.15); border: 1px solid #ef4444; border-radius: 6px; color: #f87171;"></div>
           <form id="createBookForm">
             <div class="form-section">
               <h4>Book Information</h4>
@@ -150,48 +152,64 @@
                 <div class="form-group">
                   <label for="bookLanguage">Language</label>
                   <select id="bookLanguage">
-                    <option value="en" selected>English</option>
-                    <option value="fr">French</option>
-                    <option value="es">Spanish</option>
-                    <option value="de">German</option>
-                    <option value="ar">Arabic</option>
+                    <option value="en" selected>English (en)</option>
+                    <option value="fr">French (fr)</option>
+                    <option value="es">Spanish (es)</option>
+                    <option value="de">German (de)</option>
+                    <option value="it">Italian (it)</option>
+                    <option value="pt">Portuguese (pt)</option>
+                    <option value="ar">Arabic (ar)</option>
                   </select>
                 </div>
                 <div class="form-group">
                   <label for="targetAge">Target Age Group</label>
                   <select id="targetAge">
                     <option value="3-5">Toddlers (3–5)</option>
-                    <option value="4-8" selected>Kids (4–8)</option>
+                    <option value="4-8" selected>Early Readers (4–8)</option>
                     <option value="6-10">Kids (6–10)</option>
                     <option value="8-12">Tweens (8–12)</option>
-                    <option value="adult">Adults</option>
+                    <option value="adult">Adults & Teens</option>
                   </select>
+                </div>
+                <div class="form-group">
+                  <label for="theme">Theme Description</label>
+                  <input type="text" id="theme" value="Cute woodland creatures, baby bears, foxes, deer in forest settings">
                 </div>
               </div>
             </div>
 
             <div class="form-section">
-              <h4>Content & Structure</h4>
+              <h4>Dimensions, Layout & Structure</h4>
               <div class="form-row">
                 <div class="form-group">
-                  <label for="pageCount">Number of Coloring Pages</label>
-                  <input type="number" id="pageCount" value="10" min="5" max="100">
+                  <label for="pageCount">Number of Coloring Pages (1 - 500) *</label>
+                  <input type="number" id="pageCount" value="10" min="1" max="500" required>
                 </div>
                 <div class="form-group">
                   <label for="trimSize">Trim Size</label>
                   <select id="trimSize">
                     <option value="8.5x11" selected>8.5 × 11 inches</option>
                     <option value="8x10">8 × 10 inches</option>
-                    <option value="8.5x8.5">8.5 × 8.5 inches</option>
-                    <option value="8x8">8 × 8 inches</option>
-                    <option value="custom">Custom Size</option>
+                    <option value="8.5x8.5">8.5 × 8.5 inches (Square)</option>
+                    <option value="8x8">8 × 8 inches (Square)</option>
+                    <option value="custom">Custom Dimensions</option>
                   </select>
                 </div>
-              </div>
-              <div class="form-row checkbox-row">
-                <label><input type="checkbox" id="chkBlankBacks" checked> Blank back after each coloring page</label>
-                <label><input type="checkbox" id="chkFrontMatter" checked> Include Title, Copyright & Intro</label>
-                <label><input type="checkbox" id="chkPageNumbers"> Add page numbering</label>
+                <div class="form-group">
+                  <label for="orientation">Orientation</label>
+                  <select id="orientation">
+                    <option value="PORTRAIT" selected>Portrait</option>
+                    <option value="LANDSCAPE">Landscape</option>
+                    <option value="SQUARE">Square</option>
+                  </select>
+                </div>
+                <div class="form-group">
+                  <label for="bleed">Bleed Mode</label>
+                  <select id="bleed">
+                    <option value="NO_BLEED" selected>No Bleed</option>
+                    <option value="BLEED">Bleed (+0.125" margins)</option>
+                  </select>
+                </div>
               </div>
             </div>
 
@@ -199,16 +217,51 @@
               <h4>Design & Illustration Style</h4>
               <div class="form-row">
                 <div class="form-group">
-                  <label for="complexity">Complexity Preset</label>
+                  <label for="complexity">Complexity Level</label>
                   <select id="complexity">
-                    <option value="SIMPLE" selected>Simple (Bold, thick outlines)</option>
-                    <option value="MEDIUM">Medium (Moderate details)</option>
+                    <option value="VERY_SIMPLE">Very Simple (Large shapes, minimal detail)</option>
+                    <option value="SIMPLE" selected>Simple (Bold, thick clean outlines)</option>
+                    <option value="MEDIUM">Medium (Moderate detail)</option>
                     <option value="DETAILED">Detailed (Intricate backgrounds)</option>
+                    <option value="ADVANCED">Advanced (High complexity art)</option>
                   </select>
                 </div>
                 <div class="form-group">
-                  <label for="theme">Theme Description</label>
-                  <input type="text" id="theme" value="Cute woodland creatures, baby bears, foxes, deer in forest settings">
+                  <label for="style">Illustration Style</label>
+                  <select id="style">
+                    <option value="CLEAN_LINE_ART" selected>Clean Line Art</option>
+                    <option value="BOLD_LINE_ART">Bold Line Art</option>
+                    <option value="CARTOON_LINE_ART">Cartoon Line Art</option>
+                    <option value="KIDS_COLORING">Kids Coloring</option>
+                    <option value="EDUCATIONAL_LINE_ART">Educational Line Art</option>
+                  </select>
+                </div>
+                <div class="form-group">
+                  <label for="background">Background Style</label>
+                  <select id="background">
+                    <option value="WHITE" selected>White (Pure background)</option>
+                    <option value="MINIMAL">Minimal (Subtle props)</option>
+                    <option value="SCENE">Scene (Full environment)</option>
+                    <option value="TRANSPARENT">Transparent</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            <div class="form-section">
+              <h4>Book Pages & Front Matter Options</h4>
+              <div class="form-row checkbox-row" style="flex-wrap: wrap; gap: 16px;">
+                <label><input type="checkbox" id="chkBlankBacks" checked> Blank back after each coloring page</label>
+                <label><input type="checkbox" id="chkPageNumbers"> Add page numbering</label>
+                <label><input type="checkbox" id="chkTitlePage" checked> Title Page</label>
+                <label><input type="checkbox" id="chkCopyrightPage" checked> Copyright Page</label>
+                <label><input type="checkbox" id="chkIntroPage" checked> Introduction Page</label>
+                <label><input type="checkbox" id="chkInstructionsPage"> Coloring Instructions Page</label>
+              </div>
+              <div class="form-row" style="margin-top: 14px;">
+                <div class="form-group" style="max-width: 250px;">
+                  <label><input type="checkbox" id="chkActivityPages"> Include Activity Pages</label>
+                  <input type="number" id="activityPagesCount" value="0" min="0" max="100" placeholder="Count (0-100)">
                 </div>
               </div>
             </div>
