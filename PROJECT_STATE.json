@@ -3,13 +3,13 @@
   "book_title": "Cute Forest Animals Test Book",
   "status": "RUNNING",
   "phase": "BOOK_SPEC",
-  "current_task": "TASK-001",
-  "current_workspace": "WS01",
+  "current_task": "TASK-002",
+  "current_workspace": "WS02",
   "completed_tasks": [
-    "TASK-001"
+    "TASK-001",
+    "TASK-002"
   ],
   "pending_tasks": [
-    "TASK-002",
     "TASK-003",
     "TASK-004",
     "TASK-005"
@@ -17,7 +17,7 @@
   "failed_tasks": [],
   "assets_created": [],
   "assets_failed": [],
-  "last_commit": "32d034455657f8d90f89fe6524eb7a98a9716ddb",
-  "last_successful_operation": "Workspace WS01 limit reached — Handover initiated",
-  "timestamp": "2026-09-11T00:40:21.007Z"
+  "last_commit": "0a5cb16beae94d0a8f69426cc5d0452ed9f97886",
+  "last_successful_operation": "Task TASK-002 SUCCESS on WS02",
+  "timestamp": "2026-09-11T00:40:21.478Z"
 }
