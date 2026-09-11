@@ -37,17 +37,19 @@
     "id": "TASK-003",
     "type": "PROMPT_GEN",
     "description": "Generate 5 high-quality line art prompts",
-    "status": "PENDING",
+    "status": "SUCCESS",
     "priority": 3,
-    "workspace": null,
+    "workspace": "WS03",
     "attempts": 0,
     "dependencies": [
       "TASK-002"
     ],
-    "outputs": {},
+    "outputs": {
+      "result": "[Simulation] Completed TASK-003 on WS03\n[[TASK_DONE]]"
+    },
     "errors": [],
     "created_at": "2026-09-11T00:42:37.391Z",
-    "updated_at": "2026-09-11T00:42:37.391Z"
+    "updated_at": "2026-09-11T00:42:40.351Z"
   },
   {
     "id": "TASK-004",
