@@ -1,4 +1,4 @@
-﻿/**
+/**
  * tests/hardening_tests.js
  * Comprehensive automated test suite for Orchestration MVP hardening pass.
  * Executes in an isolated sandbox directory to guarantee zero pollution of production state.
@@ -228,7 +228,7 @@ try {
 // TEST F: All 15 workspaces exhausted -> safe PAUSED state
 // -----------------------------------------------------------------------------
 try {
-  const wm = new WorkspaceManager();
+  const wm = new WorkspaceManager(createDefault15Workspaces());
   const gh = new GitHubManager({ repoPath: SANDBOX_DIR });
   const cp = new CheckpointSystem(gh);
   const tasks = createStandardMilestoneTasks(2);

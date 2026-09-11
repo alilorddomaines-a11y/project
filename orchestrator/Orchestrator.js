@@ -1,4 +1,4 @@
-﻿/**
+/**
  * orchestrator/Orchestrator.js
  * Central production orchestrator coordinating TaskQueue, WorkspaceManager,
  * LovableAdapter, CheckpointSystem, and RecoveryEngine.
@@ -26,14 +26,15 @@ export class Orchestrator {
     this.logs = [];
   }
 
-  log(message, data = null) {
+  log(message, data = null, eventType = null) {
     const entry = {
       timestamp: new Date().toISOString(),
+      event: eventType || 'INFO',
       message,
       data
     };
     this.logs.unshift(entry);
-    if (this.logs.length > 200) this.logs.pop();
+    if (this.logs.length > 250) this.logs.pop();
     if (this.onLog) this.onLog(entry);
   }
 
@@ -44,6 +45,7 @@ export class Orchestrator {
 
     this.workspaces.markActive(initialWs.id);
     this.state = createInitialState(spec, tasks, initialWs.id);
+    this.state.rotation_index = this.workspaces.getRotationIndex(initialWs.id);
 
     this.checkpoint.saveCheckpoint({
       state: this.state,
@@ -52,14 +54,19 @@ export class Orchestrator {
       triggerCommit: true
     });
 
-    this.log(`Project initialized: "${this.state.book_title}" on workspace ${initialWs.id}`);
+    this.log(
+      `Project initialized: "${this.state.book_title}" on workspace ${initialWs.id} (${this.taskQueue.getAllTasks().length} tasks)`,
+      { spec, workspace: initialWs.id },
+      'BOOK_CREATED'
+    );
+    this.log(`Workspace ${initialWs.id} selected`, { workspace: initialWs.id }, 'WORKSPACE_SELECTED');
     return this.state;
   }
 
   pause() {
     this.isPaused = true;
     if (this.state) this.state.status = PROJECT_STATUS.PAUSED;
-    this.log('Orchestrator paused by user.');
+    this.log('Orchestrator paused by user.', null, 'PROJECT_PAUSED');
     return { ok: true, status: 'PAUSED' };
   }
 
@@ -67,7 +74,7 @@ export class Orchestrator {
     this.isPaused = false;
     this.isStopped = false;
     if (this.state) this.state.status = PROJECT_STATUS.RUNNING;
-    this.log('Orchestrator resumed.');
+    this.log('Orchestrator resumed.', null, 'INFO');
     return { ok: true, status: 'RUNNING' };
   }
 
@@ -83,7 +90,7 @@ export class Orchestrator {
         triggerCommit: true
       });
     }
-    this.log('Orchestrator stopped and checkpoint saved.');
+    this.log('Orchestrator stopped and checkpoint saved.', null, 'PROJECT_STOPPED');
     return { ok: true, status: 'STOPPED' };
   }
 
@@ -105,7 +112,11 @@ export class Orchestrator {
     const canContinue = await this.adapter.canContinue(currentWs);
 
     if (!canContinue) {
-      this.log(`Workspace ${currentWs.id} legitimately cannot continue. Initiating transition protocol.`);
+      this.log(
+        `Workspace ${currentWs.id} reached legitimate continuation limit. Initiating transition protocol.`,
+        { workspace: currentWs.id },
+        'WORKSPACE_LIMIT_DETECTED'
+      );
 
       // Step A: Save atomic checkpoint before switching
       this.checkpoint.saveCheckpoint({
@@ -114,15 +125,16 @@ export class Orchestrator {
         reason: `Workspace ${currentWs.id} limit reached — Handover initiated`,
         triggerCommit: true
       });
+      this.log(`Pre-transition checkpoint created for ${currentWs.id}`, null, 'CHECKPOINT_CREATED');
 
       // Step B: Mark current workspace unavailable for current run
       this.workspaces.markUnavailable(currentWs.id, 'Legitimate limit reached');
 
-      // Step C: Select next enabled workspace
+      // Step C: Select next enabled workspace in circular order (WS01 -> ... -> WS20 -> WS01)
       const nextWs = this.workspaces.getNextWorkspace(currentWs.id);
       if (!nextWs) {
         this.state.status = PROJECT_STATUS.PAUSED;
-        this.log('ALL 15 WORKSPACES UNAVAILABLE FOR CURRENT RUN. Pausing factory safely.');
+        this.log('ALL 20 WORKSPACES UNAVAILABLE FOR CURRENT RUN. Pausing factory safely.', null, 'ALL_WORKSPACES_EXHAUSTED');
         this.checkpoint.saveCheckpoint({
           state: this.state,
           taskQueue: this.taskQueue,
@@ -132,13 +144,30 @@ export class Orchestrator {
         return { status: 'ALL_WORKSPACES_EXHAUSTED', active: false };
       }
 
-      // Step D: Reconstruct context from GitHub
+      // Step D: Reconstruct context and preserve current task
+      this.log(`Recovering context for transition to ${nextWs.id}`, null, 'RECOVERY_STARTED');
       const recovery = RecoveryEngine.recover(this.state, this.taskQueue.getAllTasks());
       this.state = recovery.recoveredState;
+      this.state.last_workspace = currentWs.id;
       this.state.current_workspace = nextWs.id;
+      this.state.rotation_index = this.workspaces.getRotationIndex(nextWs.id);
       this.workspaces.markActive(nextWs.id);
 
-      this.log(`Transition complete: Handed over from ${currentWs.id} to ${nextWs.id}. Context reconstructed.`);
+      // Post-rotation checkpoint to persist active workspace handoff
+      this.checkpoint.saveCheckpoint({
+        state: this.state,
+        taskQueue: this.taskQueue,
+        reason: `Workspace handover from ${currentWs.id} to ${nextWs.id}`,
+        triggerCommit: true
+      });
+      this.log(`Post-transition checkpoint created for ${nextWs.id}`, null, 'CHECKPOINT_CREATED');
+
+      this.log(
+        `Transition complete: Handed over from ${currentWs.id} to ${nextWs.id}. Context reconstructed.`,
+        { from: currentWs.id, to: nextWs.id, nextTask: recovery.nextTask?.id || null },
+        'WORKSPACE_ROTATED'
+      );
+      this.log(`Recovery completed on ${nextWs.id}`, null, 'RECOVERY_COMPLETED');
 
       return {
         event: 'WORKSPACE_TRANSITION',
@@ -163,10 +192,11 @@ export class Orchestrator {
           reason: 'All tasks completed successfully',
           triggerCommit: true
         });
-        this.log('ALL TASKS COMPLETED. Project finalized.');
+        this.log('ALL TASKS COMPLETED. Project finalized.', null, 'TASK_COMPLETED');
         return { status: 'COMPLETE', active: false };
       }
       // Blocked or waiting on dependencies
+      this.log('Task pipeline blocked on pending dependencies.', null, 'TASK_BLOCKED');
       return { status: 'BLOCKED', active: false };
     }
 
@@ -175,7 +205,7 @@ export class Orchestrator {
     this.state.current_task = task.id;
     this.state.status = PROJECT_STATUS.RUNNING;
 
-    this.log(`Executing ${task.id} (${task.description}) on ${currentWs.id}...`);
+    this.log(`Executing ${task.id} (${task.description}) on ${currentWs.id}...`, { task: task.id, workspace: currentWs.id }, 'TASK_STARTED');
 
     // 4. Build self-contained prompt
     const prompt = PromptBuilder.buildContinuationPrompt({
@@ -209,7 +239,7 @@ export class Orchestrator {
         triggerCommit: true
       });
 
-      this.log(`Task ${task.id} succeeded on ${currentWs.id}. Checkpoint saved.`);
+      this.log(`Task ${task.id} succeeded on ${currentWs.id}. Checkpoint saved.`, { task: task.id, workspace: currentWs.id }, 'TASK_COMPLETED');
 
       return {
         event: 'TASK_SUCCESS',
@@ -218,8 +248,80 @@ export class Orchestrator {
         active: true
       };
     } catch (error) {
+      // Branch A: Mid-execution legitimate Lovable continuation limit
+      if (error.isContinuationLimit) {
+        this.log(
+          `Legitimate limit reached on ${currentWs.id} during ${task.id}. Initiating mid-task handover.`,
+          { task: task.id, workspace: currentWs.id },
+          'WORKSPACE_LIMIT_DETECTED'
+        );
+
+        // Preserve current task: keep task pending (do not mark failed or increment failure count)
+        task.status = 'PENDING';
+
+        this.checkpoint.saveCheckpoint({
+          state: this.state,
+          taskQueue: this.taskQueue,
+          reason: `Workspace ${currentWs.id} limit during ${task.id} — Handover`,
+          triggerCommit: true
+        });
+
+        this.workspaces.markUnavailable(currentWs.id, 'Legitimate mid-task limit');
+        const nextWs = this.workspaces.getNextWorkspace(currentWs.id);
+
+        if (!nextWs) {
+          this.state.status = PROJECT_STATUS.PAUSED;
+          this.log('ALL 20 WORKSPACES UNAVAILABLE. Pausing factory safely.', null, 'ALL_WORKSPACES_EXHAUSTED');
+          return { status: 'ALL_WORKSPACES_EXHAUSTED', active: false };
+        }
+
+        this.state.last_workspace = currentWs.id;
+        this.state.current_workspace = nextWs.id;
+        this.state.rotation_index = this.workspaces.getRotationIndex(nextWs.id);
+        this.workspaces.markActive(nextWs.id);
+
+        this.checkpoint.saveCheckpoint({
+          state: this.state,
+          taskQueue: this.taskQueue,
+          reason: `Workspace handover from ${currentWs.id} to ${nextWs.id} (preserved ${task.id})`,
+          triggerCommit: true
+        });
+
+        this.log(
+          `Rotated from ${currentWs.id} to ${nextWs.id}. Task ${task.id} preserved.`,
+          { from: currentWs.id, to: nextWs.id, task: task.id },
+          'WORKSPACE_ROTATED'
+        );
+
+        return {
+          event: 'WORKSPACE_TRANSITION',
+          from: currentWs.id,
+          to: nextWs.id,
+          preservedTask: task.id,
+          active: true
+        };
+      }
+
+      // Branch B: Recoverable browser / transport error (DOM missing, navigation, tab disconnected)
+      if (error.isBrowserError) {
+        task.status = 'PENDING'; // Preserve task for retry
+        this.log(
+          `Recoverable browser/DOM error on ${currentWs.id} for ${task.id}: ${error.message}. Workspace NOT disabled.`,
+          { task: task.id, workspace: currentWs.id, error: error.message },
+          'BROWSER_ERROR'
+        );
+        return {
+          event: 'BROWSER_ERROR',
+          taskId: task.id,
+          workspace: currentWs.id,
+          error: error.message,
+          active: true
+        };
+      }
+
+      // Branch C: General task failure
       this.taskQueue.markFailed(task.id, error.message);
-      this.log(`Task ${task.id} failed on ${currentWs.id}: ${error.message}`);
+      this.log(`Task ${task.id} failed on ${currentWs.id}: ${error.message}`, { task: task.id, error: error.message }, 'TASK_FAILED');
       return {
         event: 'TASK_FAILED',
         taskId: task.id,

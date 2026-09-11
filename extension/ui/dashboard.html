@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
@@ -29,7 +29,7 @@
           <span class="nav-icon">✨</span> Create Book
         </button>
         <button class="nav-item" data-tab="workspaces">
-          <span class="nav-icon">🏢</span> Workspaces (15)
+          <span class="nav-icon">🏢</span> Workspaces (20)
         </button>
         <button class="nav-item" data-tab="task-queue">
           <span class="nav-icon">📋</span> Task Queue
@@ -71,14 +71,21 @@
           <span class="project-pill" id="activeProjectPill">No Active Project</span>
         </div>
         <div class="header-actions">
+          <button id="btnCreateBookNav" class="btn btn-primary">✨ Create Book</button>
           <button id="btnStart" class="btn btn-primary">▶ Start</button>
-          <button id="btnPause" class="btn btn-warning">⏸ Pause</button>
           <button id="btnResume" class="btn btn-success">⏵ Resume</button>
+          <button id="btnPause" class="btn btn-warning">⏸ Pause</button>
           <button id="btnStop" class="btn btn-danger">⏹ Stop</button>
+          <button id="btnResetTestRun" class="btn btn-secondary" style="border: 1px solid #ef4444; color: #ef4444;">🔄 Reset Test Run</button>
           <a href="https://github.com/alilorddomaines-a11y/project" target="_blank" class="btn btn-secondary">GitHub</a>
           <a href="https://lovable.dev/" target="_blank" class="btn btn-secondary">Lovable</a>
         </div>
       </header>
+
+      <!-- All 20 Workspaces Exhausted Banner -->
+      <div id="exhaustedBanner" style="display: none; background: #dc2626; color: #ffffff; padding: 14px 20px; font-weight: bold; text-align: center; border-radius: 6px; margin: 16px 24px 0 24px;">
+        ⚠️ ALL 20 WORKSPACES EXHAUSTED — Factory safely PAUSED. Please reset or wait for quota reset to continue.
+      </div>
 
       <!-- TAB: DASHBOARD -->
       <section id="tab-dashboard" class="tab-pane active">
@@ -277,10 +284,10 @@
       <section id="tab-workspaces" class="tab-pane">
         <div class="card table-card">
           <div class="card-header">
-            <h3>15 Configured Lovable Workspaces</h3>
+            <h3>20 Configured Lovable Workspaces</h3>
             <button id="btnSaveWorkspaces" class="btn btn-secondary">💾 Save Workspace Configuration</button>
           </div>
-          <p class="section-desc">The orchestrator automatically rotates through your 15 authorized workspaces (WS01 → WS15) whenever a workspace legitimately reaches its plan limit.</p>
+          <p class="section-desc">The orchestrator automatically rotates through your 20 authorized workspaces (WS01 → WS20) whenever a workspace legitimately reaches its plan limit.</p>
           <div class="table-responsive">
             <table class="data-table" id="workspacesTable">
               <thead>

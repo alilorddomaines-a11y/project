@@ -1,4 +1,4 @@
-﻿/**
+/**
  * extension/ui/dashboard.js
  * Interactive controller for KDP Coloring Book Factory dashboard.
  * Uses the canonical BookSpec engine for deterministic specification creation.
@@ -57,6 +57,12 @@ function renderAll() {
 
 function renderDashboard() {
   const state = currentData.state;
+  const isExhausted = currentData.isExhausted || (state?.status === 'PAUSED' && currentData.workspaces.length > 0 && currentData.workspaces.every(w => !w.enabled || w.status === 'UNAVAILABLE_FOR_RUN'));
+  const banner = $('#exhaustedBanner');
+  if (banner) {
+    banner.style.display = isExhausted ? 'block' : 'none';
+  }
+
   if (!state) {
     $('#statBookTitle').textContent = 'No Project Active';
     $('#activeProjectPill').textContent = 'IDLE';
@@ -140,7 +146,7 @@ function renderLogs() {
   currentData.logs.slice(0, 100).forEach(log => {
     const div = document.createElement('div');
     div.className = `log-entry ${log.type || 'info'}`;
-    div.textContent = `[${log.time}] ${log.message}`;
+    div.textContent = `[${log.time}] [${log.event || 'INFO'}] ${log.message}`;
     stream.appendChild(div);
 
     if (mini && mini.children.length < 6) {
@@ -153,8 +159,18 @@ function renderLogs() {
 }
 
 // 4. Bind Control Buttons
+$('#btnCreateBookNav')?.addEventListener('click', () => {
+  $$('.nav-item').forEach(b => {
+    if (b.dataset.tab === 'create-book') b.click();
+  });
+});
+
 $('#btnStart')?.addEventListener('click', () => {
-  $('#createBookForm')?.requestSubmit();
+  if (currentData.state && currentData.state.status === 'PAUSED') {
+    $('#btnResume')?.click();
+  } else {
+    $('#btnCreateBookNav')?.click();
+  }
 });
 
 $('#btnPause')?.addEventListener('click', async () => {
@@ -175,6 +191,15 @@ $('#btnStop')?.addEventListener('click', async () => {
   if (confirm('Stop the KDP Factory and save state checkpoint?')) {
     if (typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
       await chrome.runtime.sendMessage({ type: 'STOP_PROJECT' });
+      fetchData();
+    }
+  }
+});
+
+$('#btnResetTestRun')?.addEventListener('click', async () => {
+  if (confirm('Reset the test run? This resets workspace statuses and in-memory queue without modifying canonical Git history.')) {
+    if (typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
+      await chrome.runtime.sendMessage({ type: 'RESET_TEST_RUN' });
       fetchData();
     }
   }
@@ -255,7 +280,7 @@ $('#btnSaveWorkspaces')?.addEventListener('click', async () => {
 
   if (typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
     await chrome.runtime.sendMessage({ type: 'UPDATE_WORKSPACES', workspaces: updatedWorkspaces });
-    alert('15-Workspace configuration saved successfully.');
+    alert('20-Workspace configuration saved successfully.');
     fetchData();
   }
 });

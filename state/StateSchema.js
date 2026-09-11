@@ -1,4 +1,4 @@
-﻿/**
+/**
  * state/StateSchema.js
  * Canonical schema, validation, and factory for PROJECT_STATE.json
  */
@@ -26,14 +26,18 @@ export function createInitialState(spec = {}, initialTasks = [], initialWorkspac
   const now = new Date().toISOString();
   return {
     project_id: spec.id || `kdp_proj_${Date.now()}`,
-    book_title: spec.title || 'Untitled Coloring Book',
+    book_title: spec.book_title || spec.title || 'Untitled Coloring Book',
+    book_spec: spec,
     status: PROJECT_STATUS.INITIALIZING,
     phase: PROJECT_PHASE.BOOK_SPEC,
     current_task: initialTasks.length ? initialTasks[0].id : null,
     current_workspace: initialWorkspaceId,
+    last_workspace: null,
+    rotation_index: 1,
     completed_tasks: [],
     pending_tasks: initialTasks.map(t => t.id),
     failed_tasks: [],
+    blocked_tasks: [],
     assets_created: [],
     assets_failed: [],
     last_commit: '',

@@ -1,4 +1,4 @@
-﻿/**
+/**
  * state/RecoveryEngine.js
  * Hardened recovery engine distinguishing:
  * - Local filesystem state
@@ -57,9 +57,22 @@ export class RecoveryEngine {
       }
     }
 
+    let determinedStatus;
+    if (projectState.status === PROJECT_STATUS.PAUSED) {
+      determinedStatus = PROJECT_STATUS.PAUSED;
+    } else if (projectState.status === PROJECT_STATUS.STOPPED) {
+      determinedStatus = PROJECT_STATUS.STOPPED;
+    } else if (!nextTask) {
+      determinedStatus = PROJECT_STATUS.SUCCESS;
+    } else {
+      determinedStatus = projectState.status === PROJECT_STATUS.INITIALIZING
+        ? PROJECT_STATUS.INITIALIZING
+        : PROJECT_STATUS.RUNNING;
+    }
+
     const recoveredState = {
       ...projectState,
-      status: nextTask ? PROJECT_STATUS.RUNNING : PROJECT_STATUS.SUCCESS,
+      status: determinedStatus,
       current_task: nextTask ? nextTask.id : null,
       last_successful_operation: `Recovered context from ${source} (${projectState.last_commit || 'HEAD'})`,
       timestamp: new Date().toISOString()

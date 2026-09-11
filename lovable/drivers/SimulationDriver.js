@@ -1,4 +1,4 @@
-﻿/**
+/**
  * lovable/drivers/SimulationDriver.js
  * Zero-credit simulation driver for verified end-to-end rotation testing.
  * Does NOT spend real Lovable credits or contact Lovable servers.
@@ -7,14 +7,11 @@
 export class SimulationDriver {
   constructor(config = {}) {
     this.name = 'SimulationDriver';
+    this.contactedExternal = false; // Hard guarantee: 0 network calls
     // Mapping of workspaceId -> max tasks before triggering limit signal
-    this.limits = config.limits || {
-      WS01: 1, // Limit after 1 task
-      WS02: 2, // Limit after 2 tasks
-      WS03: 2,
-      WS04: 2,
-      WS05: 2
-    };
+    this.limits = config.limits || {};
+    this.midTaskLimits = config.midTaskLimits || {}; // { [workspaceId]: true }
+    this.browserErrors = config.browserErrors || {}; // { [workspaceId]: 'Error message' }
     this.tasksCompletedPerWorkspace = {};
     this.log = [];
   }
@@ -30,7 +27,7 @@ export class SimulationDriver {
   async canContinue(workspace) {
     const wsId = typeof workspace === 'string' ? workspace : workspace.id;
     const count = this.tasksCompletedPerWorkspace[wsId] || 0;
-    const maxAllowed = this.limits[wsId] ?? 3;
+    const maxAllowed = this.limits[wsId] !== undefined ? this.limits[wsId] : 3;
 
     const allowed = count < maxAllowed;
     this.log.push({
@@ -51,6 +48,24 @@ export class SimulationDriver {
 
   async sendPrompt(prompt, context = {}) {
     const wsId = context.workspaceId || 'WS01';
+
+    // 1. Simulate browser error if configured
+    if (this.browserErrors[wsId]) {
+      const msg = this.browserErrors[wsId];
+      delete this.browserErrors[wsId]; // trigger once
+      const err = new Error(`[Simulation] ${msg}`);
+      err.isBrowserError = true;
+      throw err;
+    }
+
+    // 2. Simulate mid-task continuation limit if configured
+    if (this.midTaskLimits[wsId]) {
+      delete this.midTaskLimits[wsId]; // trigger once
+      const err = new Error(`[Simulation] Legitimate continuation limit detected in visible UI on ${wsId}`);
+      err.isContinuationLimit = true;
+      throw err;
+    }
+
     this.tasksCompletedPerWorkspace[wsId] = (this.tasksCompletedPerWorkspace[wsId] || 0) + 1;
 
     this.log.push({
@@ -60,7 +75,7 @@ export class SimulationDriver {
       tasksOnWS: this.tasksCompletedPerWorkspace[wsId]
     });
 
-    // Simulate turn completion
+    // Simulate turn completion with canonical [[TASK_DONE]] marker
     return {
       ok: true,
       taskId: context.taskId,

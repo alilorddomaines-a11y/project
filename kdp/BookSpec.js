@@ -1,4 +1,4 @@
-﻿/**
+/**
  * kdp/BookSpec.js
  * Immutable, deterministic Book Specification model.
  * Single source of truth for all downstream production modules (prompts, layout, PPTX, QC).
@@ -239,19 +239,32 @@ export class BookSpec {
   }
 
   /**
-   * Saves BookSpec to canonical /state/BOOK_SPEC.json
+   * Saves BookSpec to canonical /state/BOOK_SPEC.json or browser storage
    */
-  saveToState(githubManager) {
-    return githubManager.writeProjectFile('state/BOOK_SPEC.json', this.toJSON());
+  static saveToState(spec, githubManager = null) {
+    const data = spec instanceof BookSpec ? spec.toJSON() : spec;
+    if (githubManager && typeof githubManager.writeProjectFile === 'function') {
+      githubManager.writeProjectFile('state/BOOK_SPEC.json', data);
+    } else if (typeof chrome !== 'undefined' && chrome.storage?.local) {
+      chrome.storage.local.set({ book_spec: data });
+    }
+    return data;
+  }
+
+  saveToState(githubManager = null) {
+    return BookSpec.saveToState(this, githubManager);
   }
 
   /**
    * Recovers BookSpec from canonical /state/BOOK_SPEC.json
    */
-  static loadFromState(githubManager) {
-    const raw = githubManager.readLocalFile('state/BOOK_SPEC.json');
-    if (!raw) return null;
-    return BookSpec.create(JSON.parse(raw));
+  static loadFromState(githubManager = null) {
+    if (githubManager && typeof githubManager.readLocalFile === 'function') {
+      const raw = githubManager.readLocalFile('state/BOOK_SPEC.json');
+      if (!raw) return null;
+      return BookSpec.create(JSON.parse(raw));
+    }
+    return null;
   }
 
   toJSON() {

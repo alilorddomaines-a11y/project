@@ -1,9 +1,10 @@
-﻿/**
+/**
  * extension/background/service_worker.js
- * Hardened background service worker with concurrency locks and restart recovery.
+ * Hardened background service worker supporting 20 Lovable workspaces,
+ * circular rotation, task preservation, and restart recovery.
  */
 
-import { createDefault15Workspaces } from '../../workspaces/WorkspaceConfig.js';
+import { createDefault20Workspaces } from '../../workspaces/WorkspaceConfig.js';
 import { WorkspaceManager } from '../../workspaces/WorkspaceManager.js';
 import { TaskQueue } from '../../tasks/TaskQueue.js';
 import { createStandardMilestoneTasks } from '../../tasks/TaskDefinitions.js';
@@ -43,10 +44,10 @@ async function loadInitialConfiguration() {
     'factoryStatus'
   ]);
 
-  // 1. Workspaces configuration persistence
-  const wsList = stored.workspaces && stored.workspaces.length === 15
+  // 1. Workspaces configuration persistence (Strictly 20 slots WS01-WS20)
+  const wsList = stored.workspaces && stored.workspaces.length === 20
     ? stored.workspaces
-    : createDefault15Workspaces();
+    : createDefault20Workspaces();
   workspaceManager = new WorkspaceManager(wsList);
 
   // 2. Lovable adapter setup
@@ -66,18 +67,23 @@ async function loadInitialConfiguration() {
       isPaused = true;
       isRunning = false;
       activeProject.status = PROJECT_STATUS.PAUSED;
+    } else if (stored.factoryStatus === 'STOPPED' || activeProject.status === PROJECT_STATUS.STOPPED) {
+      isPaused = false;
+      isRunning = false;
+      activeProject.status = PROJECT_STATUS.STOPPED;
     } else {
       isPaused = false;
     }
 
-    addLog('State and TaskQueue restored after extension wake/restart.', 'info');
+    addLog('State and TaskQueue restored after extension wake/restart.', 'info', 'RECOVERY_COMPLETED');
   }
 }
 
-function addLog(message, type = 'info') {
+function addLog(message, type = 'info', eventType = 'INFO') {
   const entry = {
     time: new Date().toLocaleTimeString(),
     type,
+    event: eventType,
     message
   };
   logs.unshift(entry);
@@ -90,7 +96,7 @@ async function saveState() {
     projectState: activeProject,
     taskQueue: taskQueue ? taskQueue.toJSON() : [],
     workspaces: workspaceManager ? workspaceManager.toJSON() : [],
-    factoryStatus: isPaused ? 'PAUSED' : isRunning ? 'RUNNING' : 'IDLE'
+    factoryStatus: isPaused ? 'PAUSED' : isRunning ? 'RUNNING' : activeProject?.status || 'IDLE'
   });
 
   chrome.runtime.sendMessage({
@@ -107,7 +113,7 @@ async function runExecutionLoop() {
   executionLock = true;
   isRunning = true;
 
-  addLog('Execution loop acquired lock and started.', 'info');
+  addLog('Execution loop acquired lock and started.', 'info', 'TASK_STARTED');
 
   try {
     while (isRunning && !isPaused) {
@@ -116,24 +122,27 @@ async function runExecutionLoop() {
       const currentWs = workspaceManager.getWorkspace(activeProject.current_workspace);
       if (!currentWs) break;
 
-      // 1. Evaluate canContinue
+      // 1. Evaluate canContinue capability
       const canContinue = await adapter.canContinue(currentWs);
       if (!canContinue) {
-        addLog(`Workspace ${currentWs.id} limit signal detected. Rotating to next workspace.`, 'warn');
+        addLog(`Workspace ${currentWs.id} limit signal detected. Rotating to next workspace.`, 'warn', 'WORKSPACE_LIMIT_DETECTED');
         workspaceManager.markUnavailable(currentWs.id);
 
         const nextWs = workspaceManager.getNextWorkspace(currentWs.id);
         if (!nextWs) {
-          addLog('All 15 workspaces unavailable for this run. Pausing safely.', 'error');
+          addLog('ALL 20 WORKSPACES UNAVAILABLE FOR CURRENT RUN. Pausing factory safely.', 'error', 'ALL_WORKSPACES_EXHAUSTED');
           activeProject.status = PROJECT_STATUS.PAUSED;
           isPaused = true;
+          isRunning = false;
           await saveState();
           break;
         }
 
+        activeProject.last_workspace = currentWs.id;
         activeProject.current_workspace = nextWs.id;
+        activeProject.rotation_index = workspaceManager.getRotationIndex(nextWs.id);
         workspaceManager.markActive(nextWs.id);
-        addLog(`Handoff complete: active workspace is now ${nextWs.id}`, 'info');
+        addLog(`Handoff complete: active workspace is now ${nextWs.id}`, 'info', 'WORKSPACE_ROTATED');
         await saveState();
         await new Promise(r => setTimeout(r, 1000));
         continue;
@@ -145,7 +154,7 @@ async function runExecutionLoop() {
         const remaining = taskQueue.getAllTasks().filter(t => t.status !== 'SUCCESS' && t.status !== 'SKIPPED').length;
         if (remaining === 0) {
           activeProject.status = PROJECT_STATUS.SUCCESS;
-          addLog('All tasks successfully completed!', 'success');
+          addLog('All tasks successfully completed!', 'success', 'TASK_COMPLETED');
         }
         isRunning = false;
         await saveState();
@@ -158,7 +167,7 @@ async function runExecutionLoop() {
       activeProject.status = PROJECT_STATUS.RUNNING;
       await saveState();
 
-      addLog(`Running ${task.id}: "${task.description}" on ${currentWs.id}...`, 'info');
+      addLog(`Running ${task.id}: "${task.description}" on ${currentWs.id}...`, 'info', 'TASK_STARTED');
 
       const prompt = PromptBuilder.buildContinuationPrompt({
         projectTitle: activeProject.book_title,
@@ -175,11 +184,43 @@ async function runExecutionLoop() {
           activeProject.completed_tasks.push(task.id);
         }
         activeProject.pending_tasks = activeProject.pending_tasks.filter(id => id !== task.id);
-        addLog(`Task ${task.id} succeeded on ${currentWs.id}.`, 'success');
+        addLog(`Task ${task.id} succeeded on ${currentWs.id}.`, 'success', 'TASK_COMPLETED');
         await saveState();
       } catch (err) {
+        if (err.isContinuationLimit) {
+          addLog(`Legitimate limit reached on ${currentWs.id} during ${task.id}. Preserving task and rotating.`, 'warn', 'WORKSPACE_LIMIT_DETECTED');
+          task.status = 'PENDING'; // Preserve task
+          workspaceManager.markUnavailable(currentWs.id);
+
+          const nextWs = workspaceManager.getNextWorkspace(currentWs.id);
+          if (!nextWs) {
+            addLog('ALL 20 WORKSPACES UNAVAILABLE. Pausing safely.', 'error', 'ALL_WORKSPACES_EXHAUSTED');
+            activeProject.status = PROJECT_STATUS.PAUSED;
+            isPaused = true;
+            isRunning = false;
+            await saveState();
+            break;
+          }
+
+          activeProject.last_workspace = currentWs.id;
+          activeProject.current_workspace = nextWs.id;
+          activeProject.rotation_index = workspaceManager.getRotationIndex(nextWs.id);
+          workspaceManager.markActive(nextWs.id);
+          addLog(`Rotated to ${nextWs.id}. Task ${task.id} preserved.`, 'info', 'WORKSPACE_ROTATED');
+          await saveState();
+          continue;
+        }
+
+        if (err.isBrowserError) {
+          task.status = 'PENDING'; // Preserve task for retry
+          addLog(`Browser transport/DOM error on ${currentWs.id}: ${err.message}. Workspace NOT disabled.`, 'warn', 'BROWSER_ERROR');
+          await saveState();
+          await new Promise(r => setTimeout(r, 2000));
+          continue;
+        }
+
         taskQueue.markFailed(task.id, err.message);
-        addLog(`Task ${task.id} failed: ${err.message}`, 'error');
+        addLog(`Task ${task.id} failed: ${err.message}`, 'error', 'TASK_FAILED');
         await saveState();
       }
 
@@ -202,6 +243,7 @@ chrome.runtime.onMessage.addListener((msg, sender, respond) => {
           state: activeProject,
           tasks: taskQueue ? taskQueue.getAllTasks() : [],
           workspaces: workspaceManager ? workspaceManager.getAllWorkspaces() : [],
+          isExhausted: workspaceManager ? workspaceManager.isExhausted() : false,
           logs,
           driverType: adapter?.driverType || 'simulation',
           isRunning,
@@ -209,20 +251,27 @@ chrome.runtime.onMessage.addListener((msg, sender, respond) => {
         });
         break;
 
-      case 'START_PROJECT':
-        activeProject = createInitialState(msg.spec, createStandardMilestoneTasks(msg.spec.pages || 10), 'WS01');
-        taskQueue = new TaskQueue(createStandardMilestoneTasks(msg.spec.pages || 10));
+      case 'START_PROJECT': {
+        const pageCount = Number(msg.spec?.page_count) || Number(msg.spec?.pages) || 10;
+        const tasks = createStandardMilestoneTasks(pageCount);
+        activeProject = createInitialState(msg.spec, tasks, 'WS01');
+        activeProject.status = PROJECT_STATUS.RUNNING;
+        activeProject.rotation_index = 1;
+        taskQueue = new TaskQueue(tasks);
         isPaused = false;
+        isRunning = true;
+        addLog(`Book project created: "${activeProject.book_title}" (${pageCount} coloring pages)`, 'info', 'BOOK_CREATED');
         await saveState();
         runExecutionLoop();
         respond({ ok: true, state: activeProject });
         break;
+      }
 
       case 'PAUSE_PROJECT':
         isPaused = true;
         isRunning = false;
         if (activeProject) activeProject.status = PROJECT_STATUS.PAUSED;
-        addLog('Factory paused by user', 'warn');
+        addLog('Factory paused by user', 'warn', 'PROJECT_PAUSED');
         await saveState();
         respond({ ok: true });
         break;
@@ -230,7 +279,7 @@ chrome.runtime.onMessage.addListener((msg, sender, respond) => {
       case 'RESUME_PROJECT':
         isPaused = false;
         if (activeProject) activeProject.status = PROJECT_STATUS.RUNNING;
-        addLog('Factory resumed', 'info');
+        addLog('Factory resumed', 'info', 'INFO');
         await saveState();
         runExecutionLoop();
         respond({ ok: true });
@@ -240,22 +289,35 @@ chrome.runtime.onMessage.addListener((msg, sender, respond) => {
         isPaused = false;
         isRunning = false;
         if (activeProject) activeProject.status = PROJECT_STATUS.STOPPED;
-        addLog('Factory stopped', 'error');
+        addLog('Factory stopped', 'error', 'PROJECT_STOPPED');
         await saveState();
+        respond({ ok: true });
+        break;
+
+      case 'RESET_TEST_RUN':
+        isPaused = false;
+        isRunning = false;
+        activeProject = null;
+        taskQueue = null;
+        if (workspaceManager) workspaceManager.resetRunStatuses();
+        logs = [];
+        await chrome.storage.local.remove(['projectState', 'taskQueue', 'factoryStatus']);
+        await chrome.storage.local.set({ workspaces: workspaceManager ? workspaceManager.toJSON() : [] });
+        addLog('Factory test run reset safely. Canonical Git history preserved.', 'info', 'INFO');
         respond({ ok: true });
         break;
 
       case 'SET_DRIVER':
         adapter.setDriver(msg.driverType, msg.options || {});
         await chrome.storage.local.set({ driverType: msg.driverType });
-        addLog(`Driver switched to: ${adapter.getDriverName()}`, 'info');
+        addLog(`Driver switched to: ${adapter.getDriverName()}`, 'info', 'INFO');
         respond({ ok: true, driver: adapter.getDriverName() });
         break;
 
       case 'UPDATE_WORKSPACES':
         workspaceManager = new WorkspaceManager(msg.workspaces);
         await chrome.storage.local.set({ workspaces: msg.workspaces });
-        addLog('15-Workspace configuration updated', 'info');
+        addLog('20-Workspace configuration updated', 'info', 'INFO');
         respond({ ok: true });
         break;
 
@@ -265,3 +327,4 @@ chrome.runtime.onMessage.addListener((msg, sender, respond) => {
   })();
   return true;
 });
+

@@ -1,4 +1,4 @@
-﻿/**
+/**
  * lovable/drivers/EdgeBrowserDriver.js
  * Legitimate Edge browser automation driver.
  * Interacts with Lovable strictly through the user's authenticated session in Microsoft Edge.
@@ -29,22 +29,31 @@ export class EdgeBrowserDriver {
   /**
    * Abstract capability: canContinue(workspace)
    * Evaluates legitimate signals from visible UI without scraping hidden APIs.
-   * If a visible limit banner is detected, returns false.
+   * STRICT RULE: Returns false ONLY when a legitimate visible Lovable limit notice is verified.
+   * Generic browser/DOM errors (timeouts, closed tabs, navigation) are NOT limits.
    */
-  async canContinue(workspace) {
+  async checkContinuationCapability(workspace) {
     const tab = await this.getActiveTab();
-    if (!tab) return false;
+    if (!tab) {
+      return { canContinue: true, isLimit: false, error: 'Lovable tab not found in Edge' };
+    }
 
     try {
       const response = await chrome.tabs.sendMessage(tab.id, { type: 'CHECK_LIMIT_SIGNAL' });
       if (response && response.limitDetected) {
-        return false;
+        return { canContinue: false, isLimit: true, reason: 'Visible credit/plan limit notice detected' };
       }
-      return true;
-    } catch {
-      // Tab unresponsive or navigating
-      return false;
+      return { canContinue: true, isLimit: false, error: null };
+    } catch (err) {
+      // Browser transport, page loading, or bridge initialization issue — NOT a plan limit
+      return { canContinue: true, isLimit: false, error: `Transport error: ${err.message}` };
     }
+  }
+
+  async canContinue(workspace) {
+    const capability = await this.checkContinuationCapability(workspace);
+    // ONLY return false if a legitimate limit was verified
+    return !capability.isLimit;
   }
 
   async selectWorkspace(workspace) {
@@ -53,7 +62,9 @@ export class EdgeBrowserDriver {
       if (chrome.tabs.create) {
         return await chrome.tabs.create({ url: workspace.url });
       }
-      throw new Error('No open Lovable tab found in Edge.');
+      const err = new Error('No open Lovable tab found in Edge.');
+      err.isBrowserError = true;
+      throw err;
     }
 
     if (tab.url !== workspace.url) {
@@ -67,17 +78,49 @@ export class EdgeBrowserDriver {
   async sendPrompt(prompt, context = {}) {
     const tab = await this.getActiveTab();
     if (!tab) {
-      throw new Error('Lovable tab not found in Edge. Please open https://lovable.dev/');
+      const err = new Error('Lovable tab not found in Edge. Please open https://lovable.dev/');
+      err.isBrowserError = true;
+      throw err;
     }
 
-    const response = await chrome.tabs.sendMessage(tab.id, {
-      type: 'DISPATCH_PROMPT',
-      prompt,
-      taskId: context.taskId
-    });
+    let response;
+    try {
+      response = await chrome.tabs.sendMessage(tab.id, {
+        type: 'DISPATCH_PROMPT',
+        prompt,
+        taskId: context.taskId
+      });
+    } catch (err) {
+      const transErr = new Error(`Edge bridge communication error: ${err.message}`);
+      transErr.isBrowserError = true;
+      throw transErr;
+    }
 
     if (!response || !response.ok) {
-      throw new Error(response?.error || 'Failed to dispatch prompt to Lovable UI');
+      const domErr = new Error(response?.error || 'Failed to dispatch prompt to Lovable UI');
+      domErr.isBrowserError = true;
+      throw domErr;
+    }
+
+    // 1. Legitimate continuation limit detected in visible UI
+    if (response.limitDetected) {
+      const limitErr = new Error('Legitimate Lovable continuation limit detected in visible UI');
+      limitErr.isContinuationLimit = true;
+      throw limitErr;
+    }
+
+    // 2. Transient error detected
+    if (response.transientError) {
+      const transErr = new Error('Transient error detected on Lovable page');
+      transErr.isTransientError = true;
+      throw transErr;
+    }
+
+    // 3. Verifiable completion detection via marker [[TASK_DONE]]
+    if (!response.markerDetected) {
+      const incompleteErr = new Error('Turn ended without legitimate completion marker [[TASK_DONE]]');
+      incompleteErr.isMarkerMissing = true;
+      throw incompleteErr;
     }
 
     return response;

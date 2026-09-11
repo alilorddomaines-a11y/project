@@ -1,4 +1,4 @@
-﻿/**
+/**
  * extension/content/lovable_bridge.js
  * Hardened DOM bridge strictly limited to visible, legitimate UI interactions.
  * ZERO private APIs, internal endpoints, token extraction, or network interception.
@@ -84,6 +84,11 @@
       return { ok: false, error: 'Chat input element not visible on Lovable page.' };
     }
 
+    // Baseline marker count and length to isolate current turn from prior history
+    const initialText = document.body.innerText || '';
+    const initialMarkerCount = (initialText.match(/\[\[TASK_DONE\]\]/g) || []).length;
+    const initialTextLength = initialText.length;
+
     setInputValue(input, text);
     await new Promise(r => setTimeout(r, 350));
 
@@ -96,10 +101,10 @@
       }));
     }
 
-    return await watchTurnCompletion();
+    return await watchTurnCompletion(initialMarkerCount, initialTextLength);
   }
 
-  async function watchTurnCompletion() {
+  async function watchTurnCompletion(initialMarkerCount = 0, initialTextLength = 0) {
     if (watching) return { ok: false, error: 'Turn watcher already active' };
     watching = true;
     const started = Date.now();
@@ -112,9 +117,10 @@
     while (Date.now() - started < HARD_TIMEOUT_MS) {
       const visibleText = document.body.innerText || '';
       const len = visibleText.length;
+      const currentMarkerCount = (visibleText.match(/\[\[TASK_DONE\]\]/g) || []).length;
 
-      // Check explicit marker
-      if (visibleText.includes('[[TASK_DONE]]')) {
+      // Check explicit marker emitted specifically during this turn
+      if (currentMarkerCount > initialMarkerCount) {
         break;
       }
 
@@ -139,11 +145,13 @@
 
     watching = false;
     const body = document.body.innerText || '';
+    const recentOutput = body.slice(Math.max(0, initialTextLength));
     const tail = body.slice(-6000);
 
     const limitDetected = CREDIT_LIMIT_RE.test(tail);
     const transientError = TRANSIENT_ERROR_RE.test(tail);
-    const markerDetected = body.includes('[[TASK_DONE]]');
+    const finalMarkerCount = (body.match(/\[\[TASK_DONE\]\]/g) || []).length;
+    const markerDetected = finalMarkerCount > initialMarkerCount;
     const timedOut = Date.now() - started >= HARD_TIMEOUT_MS;
 
     return {
@@ -152,7 +160,7 @@
       transientError,
       markerDetected,
       timedOut,
-      output: body.slice(-8000)
+      output: recentOutput.length > 0 ? recentOutput : tail
     };
   }
 
