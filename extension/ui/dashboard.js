@@ -39,8 +39,12 @@ async function fetchData() {
       const res = await chrome.runtime.sendMessage({ type: 'GET_DATA' });
       if (res) {
         currentData = res;
-        renderAll();
       }
+      if (chrome.storage?.local) {
+        const stored = await chrome.storage.local.get(['targetProject']);
+        if (stored.targetProject) currentData.targetProject = stored.targetProject;
+      }
+      renderAll();
     }
   } catch (e) {
     console.warn('Direct extension messaging unavailable; using local cache', e);
@@ -60,6 +64,10 @@ function renderSettings() {
   const driverSel = $('#driverSelect');
   if (driverSel && !driverSel.matches(':focus') && currentData.driverType) {
     driverSel.value = currentData.driverType;
+  }
+  const projInput = $('#targetProjectInput');
+  if (projInput && !projInput.matches(':focus') && currentData.targetProject) {
+    projInput.value = currentData.targetProject;
   }
 }
 
@@ -89,7 +97,12 @@ function renderDashboard() {
   $('#statBookTitle').textContent = state.book_title || 'Untitled';
   $('#activeProjectPill').textContent = state.status;
   $('#statAudience').textContent = `Phase: ${state.phase}`;
-  $('#statWorkspace').textContent = state.current_workspace || 'WS01';
+  
+  const currentWsObj = currentData.workspaces.find(w => w.id === state.current_workspace);
+  const wsDisplay = currentWsObj && currentWsObj.realName
+    ? `${state.current_workspace} (${currentWsObj.realName})`
+    : state.current_workspace || 'WS01';
+  $('#statWorkspace').textContent = wsDisplay;
   $('#statCommit').textContent = state.last_commit ? state.last_commit.substring(0, 7) : 'HEAD';
 
   const total = currentData.tasks.length;
@@ -111,13 +124,17 @@ function renderWorkspaces() {
 
   currentData.workspaces.forEach((ws, idx) => {
     const tr = document.createElement('tr');
+    const isMapped = !!ws.mapped;
+    const displayName = ws.realName || ws.name || '';
     tr.innerHTML = `
       <td><strong>${ws.order || idx + 1}</strong></td>
       <td><code>${ws.id}</code></td>
-      <td><input type="text" class="ws-name-input" data-id="${ws.id}" value="${ws.name}"></td>
-      <td><span class="badge ${ws.status === 'ACTIVE' ? 'badge-success' : ws.status === 'UNAVAILABLE_FOR_RUN' ? 'badge-warning' : 'badge-neutral'}">${ws.status}</span></td>
+      <td>
+        <input type="text" class="ws-name-input" data-id="${ws.id}" value="${displayName}" placeholder="Discovered real workspace name" style="width: 100%; font-weight: ${isMapped ? '600' : 'normal'};">
+      </td>
+      <td><span class="badge ${ws.status === 'ACTIVE' ? 'badge-success' : ws.status === 'UNAVAILABLE_FOR_RUN' ? 'badge-warning' : ws.status === 'DISABLED' ? 'badge-danger' : 'badge-neutral'}">${ws.status}</span></td>
       <td><input type="checkbox" class="ws-enable-toggle" data-id="${ws.id}" ${ws.enabled ? 'checked' : ''}></td>
-      <td><input type="text" class="ws-url-input" data-id="${ws.id}" value="${ws.url}" style="width: 100%;"></td>
+      <td><span class="badge ${isMapped ? 'badge-success' : 'badge-neutral'}">${isMapped ? 'MAPPED' : 'UNMAPPED'}</span></td>
     `;
     tbody.appendChild(tr);
   });
@@ -288,14 +305,16 @@ async function handleCreateBookSubmit(e) {
     $('#statWorkspace').textContent = 'WS01';
 
     const driverType = $('#driverSelect')?.value || currentData.driverType || 'browser';
-    console.log('[CREATE_BOOK] sending START_PROJECT to service worker with driver:', driverType);
+    const targetProject = $('#targetProjectInput')?.value?.trim() || currentData.targetProject || '';
+    console.log('[CREATE_BOOK] sending START_PROJECT to service worker with driver:', driverType, 'targetProject:', targetProject);
     addLocalLog(`[CREATE_BOOK] sending START_PROJECT with driver: ${driverType}`, 'info', 'CREATE_BOOK');
 
     if (typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
       const res = await chrome.runtime.sendMessage({
         type: 'START_PROJECT',
         spec: spec.toJSON(),
-        driverType
+        driverType,
+        targetProject
       });
 
       console.log('[CREATE_BOOK] service worker response:', res);
@@ -335,21 +354,49 @@ $('#btnSubmitCreateBook')?.addEventListener('click', (e) => {
   }
 });
 
+// Discover Real Workspaces from Lovable UI
+$('#btnDiscoverWorkspaces')?.addEventListener('click', async () => {
+  const btn = $('#btnDiscoverWorkspaces');
+  const originalText = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = '⏳ Discovering from Lovable UI...';
+  addLocalLog('[WORKSPACE] initiating real Lovable workspace discovery...', 'info', 'WORKSPACE');
+
+  try {
+    if (typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
+      const res = await chrome.runtime.sendMessage({ type: 'DISCOVER_WORKSPACES' });
+      if (res && res.ok) {
+        addLocalLog(`[WORKSPACE] Discovered ${res.mappedCount} real workspaces! Mapped to slots.`, 'success', 'WORKSPACE_MAPPED');
+        alert(`Success! Discovered ${res.mappedCount} real Lovable workspaces.\n\nThey have been mapped to internal slots WS01 through WS${String(res.mappedCount).padStart(2, '0')}.`);
+        await fetchData();
+      } else {
+        throw new Error(res?.error || 'Failed to discover workspaces from Lovable UI.');
+      }
+    }
+  } catch (err) {
+    console.error('[ERROR] Discover workspaces failed:', err);
+    addLocalLog(`[ERROR] Discover workspaces failed: ${err.message}`, 'error', 'ERROR');
+    alert(`Workspace Discovery Failed:\n${err.message}\n\nPlease ensure you have an open Lovable tab logged in at https://lovable.dev/`);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = originalText;
+  }
+});
 
 // Save Workspaces
 $('#btnSaveWorkspaces')?.addEventListener('click', async () => {
   const updatedWorkspaces = [...currentData.workspaces];
   $$('.ws-name-input').forEach(input => {
     const ws = updatedWorkspaces.find(w => w.id === input.dataset.id);
-    if (ws) ws.name = input.value.trim();
+    if (ws) {
+      ws.name = input.value.trim();
+      ws.realName = input.value.trim();
+      ws.mapped = true;
+    }
   });
   $$('.ws-enable-toggle').forEach(input => {
     const ws = updatedWorkspaces.find(w => w.id === input.dataset.id);
     if (ws) ws.enabled = input.checked;
-  });
-  $$('.ws-url-input').forEach(input => {
-    const ws = updatedWorkspaces.find(w => w.id === input.dataset.id);
-    if (ws) ws.url = input.value.trim();
   });
 
   if (typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
@@ -363,6 +410,12 @@ $('#btnSaveWorkspaces')?.addEventListener('click', async () => {
 $('#btnSaveSettings')?.addEventListener('click', async () => {
   const driverType = $('#driverSelect')?.value || 'simulation';
   const maxRetries = Number($('#maxRetriesInput')?.value) || 3;
+  const targetProject = $('#targetProjectInput')?.value?.trim() || '';
+
+  if (typeof chrome !== 'undefined' && chrome.storage?.local) {
+    await chrome.storage.local.set({ targetProject });
+    currentData.targetProject = targetProject;
+  }
 
   if (typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
     await chrome.runtime.sendMessage({

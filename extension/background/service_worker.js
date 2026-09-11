@@ -153,7 +153,45 @@ async function runExecutionLoop() {
       addLog(`[WORKSPACE] ${currentWs.id} selected`, 'info', 'WORKSPACE');
       console.log(`[WORKSPACE] ${currentWs.id} selected`);
 
-      // 1. Evaluate canContinue capability
+      // 0. Auto-discovery on first run if workspaces are not yet mapped
+      if (!currentWs.mapped && adapter.getDriverName() === 'EdgeBrowserDriver') {
+        try {
+          addLog('[EDGE] discovering real Workspaces', 'info', 'EDGE');
+          const discovered = await adapter.discoverWorkspaces();
+          if (Array.isArray(discovered) && discovered.length > 0) {
+            const mappedInfo = workspaceManager.applyDiscoveredWorkspaces(discovered);
+            addLog(`Discovered ${mappedInfo.mappedCount} real workspaces. Internal mapping active.`, 'success', 'WORKSPACE_MAPPED');
+            await saveState();
+          }
+        } catch (discErr) {
+          if (discErr.isAuthError) {
+            addLog('[ERROR] Lovable user is not authenticated. Please log in at https://lovable.dev/', 'error', 'AUTH_ERROR');
+            activeProject.status = PROJECT_STATUS.PAUSED;
+            isPaused = true;
+            isRunning = false;
+            await saveState();
+            break;
+          }
+          addLog(`[WARN] Workspace auto-discovery skipped: ${discErr.message}`, 'warn', 'WORKSPACE_WARN');
+        }
+      }
+
+      // 1. Select and verify target workspace in visible Lovable DOM
+      try {
+        await adapter.selectWorkspace(currentWs);
+      } catch (wsSelectErr) {
+        if (wsSelectErr.isAuthError) {
+          addLog('[ERROR] Lovable authentication required. Pausing factory.', 'error', 'AUTH_ERROR');
+          activeProject.status = PROJECT_STATUS.PAUSED;
+          isPaused = true;
+          isRunning = false;
+          await saveState();
+          break;
+        }
+        addLog(`[WARN] Workspace DOM selection warning: ${wsSelectErr.message}`, 'warn', 'WORKSPACE_WARN');
+      }
+
+      // 2. Evaluate canContinue capability
       const canContinue = await adapter.canContinue(currentWs);
       if (!canContinue) {
         addLog(`Workspace ${currentWs.id} limit signal detected. Rotating to next workspace.`, 'warn', 'WORKSPACE_LIMIT_DETECTED');
@@ -173,13 +211,13 @@ async function runExecutionLoop() {
         activeProject.current_workspace = nextWs.id;
         activeProject.rotation_index = workspaceManager.getRotationIndex(nextWs.id);
         workspaceManager.markActive(nextWs.id);
-        addLog(`Handoff complete: active workspace is now ${nextWs.id}`, 'info', 'WORKSPACE_ROTATED');
+        addLog(`Handoff complete: active workspace is now ${nextWs.id} (${nextWs.realName || nextWs.name})`, 'info', 'WORKSPACE_ROTATED');
         await saveState();
         await new Promise(r => setTimeout(r, 1000));
         continue;
       }
 
-      // 2. Fetch next executable task
+      // 3. Fetch next executable task
       const task = taskQueue.getNextExecutableTask();
       if (!task) {
         const remaining = taskQueue.getAllTasks().filter(t => t.status !== 'SUCCESS' && t.status !== 'SKIPPED').length;
@@ -193,7 +231,7 @@ async function runExecutionLoop() {
         break;
       }
 
-      // 3. Mark task RUNNING
+      // 4. Mark task RUNNING
       taskQueue.markRunning(task.id, currentWs.id);
       activeProject.current_task = task.id;
       activeProject.status = PROJECT_STATUS.RUNNING;
@@ -217,7 +255,9 @@ async function runExecutionLoop() {
         const result = await adapter.sendPrompt(prompt, {
           taskId: task.id,
           workspaceId: currentWs.id,
-          workspace: currentWs
+          workspace: currentWs,
+          realName: currentWs.realName,
+          projectName: activeProject.target_project || null
         });
 
         taskQueue.markSuccess(task.id, { output: result.output });
@@ -250,7 +290,7 @@ async function runExecutionLoop() {
           activeProject.current_workspace = nextWs.id;
           activeProject.rotation_index = workspaceManager.getRotationIndex(nextWs.id);
           workspaceManager.markActive(nextWs.id);
-          addLog(`Rotated to ${nextWs.id}. Task ${task.id} preserved.`, 'info', 'WORKSPACE_ROTATED');
+          addLog(`Rotated to ${nextWs.id} (${nextWs.realName || nextWs.name}). Task ${task.id} preserved.`, 'info', 'WORKSPACE_ROTATED');
           await saveState();
           continue;
         }
@@ -323,6 +363,9 @@ chrome.runtime.onMessage.addListener((msg, sender, respond) => {
           activeProject = createInitialState(msg.spec, tasks, 'WS01');
           activeProject.status = PROJECT_STATUS.RUNNING;
           activeProject.rotation_index = 1;
+          if (msg.targetProject) {
+            activeProject.target_project = msg.targetProject;
+          }
           taskQueue = new TaskQueue(tasks);
 
           isPaused = false;
@@ -400,6 +443,32 @@ chrome.runtime.onMessage.addListener((msg, sender, respond) => {
           addLog('20-Workspace configuration updated', 'info', 'INFO');
           respond({ ok: true });
           break;
+
+        case 'DISCOVER_WORKSPACES': {
+          addLog('[EDGE] discovering real Workspaces', 'info', 'EDGE');
+          try {
+            const discovered = await adapter.discoverWorkspaces();
+            if (Array.isArray(discovered) && discovered.length > 0) {
+              const mappedInfo = workspaceManager.applyDiscoveredWorkspaces(discovered);
+              addLog(`Discovered ${mappedInfo.mappedCount} real workspaces. Internal mapping active.`, 'success', 'WORKSPACE_MAPPED');
+              await saveState();
+              respond({
+                ok: true,
+                mappedCount: mappedInfo.mappedCount,
+                workspaces: workspaceManager.getAllWorkspaces()
+              });
+            } else {
+              respond({
+                ok: false,
+                error: 'No real workspaces discovered. Please ensure Lovable is open and authenticated in Edge.'
+              });
+            }
+          } catch (discErr) {
+            addLog(`[ERROR] Workspace discovery error: ${discErr.message}`, 'error', 'WORKSPACE_ERROR');
+            respond({ ok: false, error: discErr.message });
+          }
+          break;
+        }
 
         default:
           respond({ ok: false, error: `Unknown message type: ${msg.type}` });

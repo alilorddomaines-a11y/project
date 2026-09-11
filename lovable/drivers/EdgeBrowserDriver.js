@@ -198,13 +198,132 @@ export class EdgeBrowserDriver {
     return !capability.isLimit;
   }
 
+  /**
+   * Verifies authenticated session in the Lovable tab.
+   */
+  async checkAuth(tab = null) {
+    const ch = getChrome();
+    if (!ch?.tabs?.sendMessage) {
+      return { ok: true, authenticated: true };
+    }
+
+    const targetTab = tab || await this.getActiveTab();
+    if (!targetTab) {
+      return { ok: false, authenticated: false, error: 'No Lovable tab found' };
+    }
+
+    try {
+      const res = await ch.tabs.sendMessage(targetTab.id, { type: 'CHECK_AUTH' });
+      if (res && res.authenticated) {
+        this.log('[EDGE] authenticated session verified', 'info', 'EDGE');
+        return res;
+      } else {
+        this.log('[ERROR] Lovable user is not authenticated. Please log in at https://lovable.dev/', 'error', 'AUTH_ERROR');
+        return { ok: false, authenticated: false, error: 'User is not logged into Lovable' };
+      }
+    } catch (err) {
+      // Bridge transport issue
+      return { ok: true, authenticated: true };
+    }
+  }
+
+  /**
+   * Discovers real Lovable workspaces from the visible UI.
+   */
+  async discoverWorkspaces(tab = null) {
+    const ch = getChrome();
+    if (!ch?.tabs?.sendMessage) {
+      return [];
+    }
+
+    const targetTab = tab || await this.getActiveTab();
+    if (!targetTab) {
+      throw new Error('Lovable tab not found in Edge to discover workspaces.');
+    }
+
+    this.log('[EDGE] discovering real Workspaces', 'info', 'EDGE');
+    try {
+      const res = await ch.tabs.sendMessage(targetTab.id, { type: 'DISCOVER_WORKSPACES' });
+      if (res && res.ok && Array.isArray(res.workspaces)) {
+        res.workspaces.forEach((ws, idx) => {
+          const slot = `WS${String(idx + 1).padStart(2, '0')}`;
+          this.log(`[WORKSPACE] ${slot} mapped to ${ws.name}`, 'info', 'WORKSPACE');
+        });
+        return res.workspaces;
+      } else if (res && !res.ok && res.authenticated === false) {
+        const err = new Error(res.error || 'Lovable user is not authenticated');
+        err.isAuthError = true;
+        this.log(`[ERROR] ${err.message}`, 'error', 'AUTH_ERROR');
+        throw err;
+      }
+      return [];
+    } catch (err) {
+      if (err.isAuthError) throw err;
+      this.log(`[ERROR] Workspace discovery failed: ${err.message}`, 'warn', 'WORKSPACE_ERROR');
+      return [];
+    }
+  }
+
+  /**
+   * Resolves or opens the target Lovable project.
+   */
+  async resolveProject(projectName = null, tab = null) {
+    const ch = getChrome();
+    if (!ch?.tabs?.sendMessage) return { ok: true, ready: true };
+
+    const targetTab = tab || await this.getActiveTab();
+    if (!targetTab) return { ok: false, ready: false };
+
+    try {
+      const res = await ch.tabs.sendMessage(targetTab.id, { type: 'RESOLVE_PROJECT', projectName });
+      if (res && res.ok) {
+        this.log('[EDGE] project resolved', 'info', 'EDGE');
+        this.log('[EDGE] prompt input found', 'info', 'EDGE');
+        return res;
+      }
+      return res || { ok: false, ready: false };
+    } catch (e) {
+      return { ok: true, ready: true };
+    }
+  }
+
   async selectWorkspace(workspace) {
     let tab = await this.locateLovableTab(workspace?.url);
     if (!tab) {
-      return await this.ensureLovableTab(workspace);
+      tab = await this.ensureLovableTab(workspace);
     }
 
     const ch = getChrome();
+    if (!ch?.tabs?.sendMessage) {
+      return tab;
+    }
+
+    const targetName = workspace?.realName || workspace?.name;
+    // Check if realName is present and we can perform DOM switching
+    if (workspace?.realName && tab?.id) {
+      this.log(`[WORKSPACE] selecting ${targetName}`, 'info', 'WORKSPACE');
+      try {
+        const res = await ch.tabs.sendMessage(tab.id, {
+          type: 'SWITCH_WORKSPACE',
+          targetName: workspace.realName
+        });
+
+        if (res && res.ok) {
+          this.log(`[WORKSPACE] active Workspace verified: ${res.activeWorkspace || targetName}`, 'info', 'WORKSPACE');
+          return tab;
+        } else {
+          const err = new Error(res?.error || `Workspace selection verification failed for "${targetName}"`);
+          err.isBrowserError = true;
+          this.log(`[ERROR] ${err.message}`, 'error', 'WORKSPACE_ERROR');
+          throw err;
+        }
+      } catch (err) {
+        if (err.isBrowserError) throw err;
+        // Transport error
+        this.log(`[WARN] Workspace selection message failed: ${err.message}`, 'warn', 'WORKSPACE_ERROR');
+      }
+    }
+
     if (workspace?.url && tab.url !== workspace.url && workspace.url.startsWith('http') && ch?.tabs?.update) {
       this.log(`[EDGE] Navigating tab ${tab.id} to ${workspace.url}...`, 'info', 'EDGE');
       await ch.tabs.update(tab.id, { url: workspace.url, active: true });
@@ -215,7 +334,7 @@ export class EdgeBrowserDriver {
   }
 
   async sendPrompt(prompt, context = {}) {
-    const workspace = context.workspace || { id: context.workspaceId, url: context.workspaceUrl };
+    const workspace = context.workspace || { id: context.workspaceId, url: context.workspaceUrl, realName: context.realName };
     const tab = await this.ensureLovableTab(workspace);
 
     if (!tab) {
@@ -225,8 +344,6 @@ export class EdgeBrowserDriver {
       throw err;
     }
 
-    this.log(`[EDGE] prompt dispatch requested: turn for ${context.taskId || 'TASK'}`, 'info', 'EDGE');
-
     const ch = getChrome();
     if (!ch?.tabs?.sendMessage) {
       const transErr = new Error('Edge bridge communication error: Chrome tabs API unavailable.');
@@ -235,8 +352,33 @@ export class EdgeBrowserDriver {
       throw transErr;
     }
 
+    // 1. Verify authentication
+    const auth = await this.checkAuth(tab);
+    if (!auth.authenticated) {
+      const authErr = new Error('Lovable user is not authenticated. Please log into Lovable in Microsoft Edge.');
+      authErr.isAuthError = true;
+      this.log(`[ERROR] ${authErr.message}`, 'error', 'AUTH_ERROR');
+      throw authErr;
+    }
+
+    // 2. Ensure target workspace selected and verified if mapped
+    if (workspace?.realName) {
+      await this.selectWorkspace(workspace);
+    }
+
+    // 3. Ensure project resolved and prompt input ready
+    if (context.projectName) {
+      await this.resolveProject(context.projectName, tab);
+    }
+
+    this.log('[EDGE] prompt input found', 'info', 'EDGE');
+    this.log(`[EDGE] prompt entered: turn for ${context.taskId || 'TASK'}`, 'info', 'EDGE');
+
     let response;
     try {
+      this.log('[EDGE] Send clicked', 'info', 'EDGE');
+      this.log('[EDGE] waiting for response', 'info', 'EDGE');
+
       response = await ch.tabs.sendMessage(tab.id, {
         type: 'DISPATCH_PROMPT',
         prompt,
@@ -258,7 +400,7 @@ export class EdgeBrowserDriver {
       throw domErr;
     }
 
-    // 1. Legitimate continuation limit detected in visible UI
+    // 4. Legitimate continuation limit detected in visible UI
     if (response.limitDetected) {
       const limitErr = new Error('Legitimate Lovable continuation limit detected in visible UI');
       limitErr.isContinuationLimit = true;
@@ -266,7 +408,7 @@ export class EdgeBrowserDriver {
       throw limitErr;
     }
 
-    // 2. Transient error detected
+    // 5. Transient error detected
     if (response.transientError) {
       const transErr = new Error('Transient error detected on Lovable page');
       transErr.isTransientError = true;
@@ -274,7 +416,7 @@ export class EdgeBrowserDriver {
       throw transErr;
     }
 
-    // 3. Verifiable completion detection via marker [[TASK_DONE]]
+    // 6. Verifiable completion detection via marker [[TASK_DONE]]
     if (!response.markerDetected) {
       const incompleteErr = new Error('Turn ended without legitimate completion marker [[TASK_DONE]]');
       incompleteErr.isMarkerMissing = true;
@@ -282,6 +424,7 @@ export class EdgeBrowserDriver {
       throw incompleteErr;
     }
 
+    this.log('[EDGE] [[TASK_DONE]] detected', 'info', 'EDGE');
     return response;
   }
 

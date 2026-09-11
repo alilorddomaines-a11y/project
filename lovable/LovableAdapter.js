@@ -62,6 +62,27 @@ export class LovableAdapter {
     return await this.driver.sendPrompt(prompt, context);
   }
 
+  async checkAuth(tab = null) {
+    if (typeof this.driver?.checkAuth === 'function') {
+      return await this.driver.checkAuth(tab);
+    }
+    return { ok: true, authenticated: true };
+  }
+
+  async discoverWorkspaces(tab = null) {
+    if (typeof this.driver?.discoverWorkspaces === 'function') {
+      return await this.driver.discoverWorkspaces(tab);
+    }
+    return [];
+  }
+
+  async resolveProject(projectName = null, tab = null) {
+    if (typeof this.driver?.resolveProject === 'function') {
+      return await this.driver.resolveProject(projectName, tab);
+    }
+    return { ok: true, inProject: true };
+  }
+
   async getProjectStatus() {
     return await this.driver.getProjectStatus();
   }

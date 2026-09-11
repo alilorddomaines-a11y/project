@@ -28,6 +28,9 @@ export function createDefault20Workspaces() {
     list.push({
       id,
       name: `Workspace ${String(i).padStart(2, '0')}`,
+      realName: null,
+      realId: null,
+      mapped: false,
       url: `https://lovable.dev/projects?workspace=${id}`,
       enabled: true,
       order: i,

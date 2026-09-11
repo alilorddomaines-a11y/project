@@ -143,6 +143,55 @@ export class WorkspaceManager {
     }
   }
 
+  /**
+   * Maps discovered real Lovable workspaces to internal slots WS01 - WS20.
+   * Hard constraint: Never invent missing workspaces or create WS21.
+   * If fewer than 20 real workspaces are provided, maps only the available ones
+   * and marks the remaining slots unmapped and disabled.
+   * @param {Array<{name: string, id?: string, active?: boolean}>} discoveredList
+   * @returns {{ mappedCount: number, totalSlots: number }}
+   */
+  applyDiscoveredWorkspaces(discoveredList = []) {
+    if (!Array.isArray(discoveredList)) {
+      throw new Error('Discovered workspaces list must be an array.');
+    }
+
+    this.ensureOrdering();
+    const count = Math.min(discoveredList.length, MAX_WORKSPACES);
+
+    for (let i = 0; i < MAX_WORKSPACES; i++) {
+      const ws = this.workspaces[i];
+      if (!ws) continue;
+
+      if (i < count) {
+        const real = discoveredList[i];
+        ws.realName = real.name || `Real Workspace ${i + 1}`;
+        ws.name = ws.realName;
+        ws.realId = real.id || null;
+        ws.mapped = true;
+        ws.enabled = true;
+        if (real.active) {
+          ws.status = WORKSPACE_STATUS.ACTIVE;
+        } else if (ws.status === WORKSPACE_STATUS.DISABLED) {
+          ws.status = WORKSPACE_STATUS.IDLE;
+        }
+      } else {
+        // Unmapped slots when user has fewer than 20 real workspaces
+        ws.realName = null;
+        ws.realId = null;
+        ws.mapped = false;
+        ws.enabled = false;
+        ws.status = WORKSPACE_STATUS.DISABLED;
+      }
+    }
+
+    return { mappedCount: count, totalSlots: MAX_WORKSPACES };
+  }
+
+  getMappedWorkspaces() {
+    return this.workspaces.filter(w => w.mapped);
+  }
+
   toJSON() {
     return JSON.parse(JSON.stringify(this.workspaces));
   }
