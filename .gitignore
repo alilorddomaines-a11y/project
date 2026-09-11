@@ -7,3 +7,5 @@ output/
 Thumbs.db
 gcm-diagnose.log
 push_out.txt
+tests/.sim_workspace/
+tests/sandbox/

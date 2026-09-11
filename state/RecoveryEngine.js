@@ -1,42 +1,50 @@
 ﻿/**
  * state/RecoveryEngine.js
- * Startup and crash recovery engine. Reconstructs execution context from
- * PROJECT_STATE.json and TASK_QUEUE.json without repeating completed work.
+ * Hardened recovery engine distinguishing:
+ * - Local filesystem state
+ * - Committed Git state (HEAD)
+ * - Remote GitHub state (origin/main)
+ * 
+ * Never claims remote recovery when only local files are used.
  */
 
 import { validateState, PROJECT_STATUS } from './StateSchema.js';
 
 export class RecoveryEngine {
   /**
-   * Reconstructs execution state from persisted files.
-   * @param {Object} projectState - Parsed PROJECT_STATE.json
-   * @param {Array} taskQueue - Parsed TASK_QUEUE.json array
-   * @returns {Object} { recoveredState, nextTask, resumePlan }
+   * Primary recovery method called during runtime transitions.
    */
   static recover(projectState, taskQueue) {
+    return this.reconstruct(projectState, taskQueue, 'RUNTIME_RECOVERY');
+  }
+
+  /**
+   * Performs core state reconstruction from parsed state & queue objects.
+   */
+  static reconstruct(projectState, taskQueue, source = 'UNKNOWN') {
     if (!projectState) {
-      throw new Error('Recovery failed: No project state provided.');
+      throw new Error(`Recovery failed: No project state found for source: ${source}`);
     }
     validateState(projectState);
 
     const tasks = Array.isArray(taskQueue) ? taskQueue : [];
     const completedSet = new Set(projectState.completed_tasks || []);
 
-    // Sanity check: Ensure tasks in completedSet are marked SUCCESS in queue
+    // 1. Mark all completed tasks as SUCCESS so they are never repeated
     tasks.forEach(t => {
       if (completedSet.has(t.id)) {
         t.status = 'SUCCESS';
       }
     });
 
-    // Locate interrupted task if any was left in RUNNING status
+    // 2. Locate interrupted tasks (left in RUNNING state) and reset to PENDING
     let interruptedTask = tasks.find(t => t.status === 'RUNNING');
     if (interruptedTask) {
       interruptedTask.status = 'PENDING';
       interruptedTask.attempts = (interruptedTask.attempts || 0) + 1;
     }
 
-    // Find the next task: first non-completed, non-skipped task whose dependencies are satisfied
+    // 3. Resolve next executable task via DAG dependencies
     const pendingTasks = tasks.filter(t => t.status === 'PENDING');
     let nextTask = null;
 
@@ -53,7 +61,7 @@ export class RecoveryEngine {
       ...projectState,
       status: nextTask ? PROJECT_STATUS.RUNNING : PROJECT_STATUS.SUCCESS,
       current_task: nextTask ? nextTask.id : null,
-      last_successful_operation: `Recovered context from commit ${projectState.last_commit || 'HEAD'}`,
+      last_successful_operation: `Recovered context from ${source} (${projectState.last_commit || 'HEAD'})`,
       timestamp: new Date().toISOString()
     };
 
@@ -62,7 +70,55 @@ export class RecoveryEngine {
       tasks,
       nextTask,
       completedCount: completedSet.size,
-      remainingCount: tasks.length - completedSet.size
+      remainingCount: tasks.length - completedSet.size,
+      recoverySource: source
     };
+  }
+
+  /**
+   * Source A: Recover from local uncommitted filesystem files
+   */
+  static recoverFromLocal(githubManager) {
+    const stateRaw = githubManager.readLocalFile('PROJECT_STATE.json');
+    const queueRaw = githubManager.readLocalFile('TASK_QUEUE.json');
+
+    if (!stateRaw || !queueRaw) {
+      throw new Error('Local state files (PROJECT_STATE.json / TASK_QUEUE.json) not found.');
+    }
+
+    return this.reconstruct(JSON.parse(stateRaw), JSON.parse(queueRaw), 'LOCAL_FILESYSTEM');
+  }
+
+  /**
+   * Source B: Recover from committed Git repository state (HEAD)
+   */
+  static recoverFromGit(githubManager, commitRef = 'HEAD') {
+    const stateRaw = githubManager.readCommittedFile('PROJECT_STATE.json', commitRef);
+    const queueRaw = githubManager.readCommittedFile('TASK_QUEUE.json', commitRef);
+
+    if (!stateRaw || !queueRaw) {
+      throw new Error(`Committed state files not found at git ref: ${commitRef}`);
+    }
+
+    return this.reconstruct(JSON.parse(stateRaw), JSON.parse(queueRaw), 'COMMITTED_GIT_STATE');
+  }
+
+  /**
+   * Source C: Recover from remote GitHub repository (origin/main)
+   */
+  static recoverFromRemote(githubManager, branch = 'main') {
+    githubManager.verifyCanonicalRemote();
+
+    if (!githubManager.isRemoteReachable()) {
+      throw new Error('GitHub remote origin is currently unreachable or requires authentication.');
+    }
+
+    const remoteHash = githubManager.getRemoteCommitHash(branch);
+    if (!remoteHash) {
+      throw new Error(`Remote branch origin/${branch} has no commits yet or is not readable.`);
+    }
+
+    // Read committed files at the remote commit reference
+    return this.recoverFromGit(githubManager, remoteHash);
   }
 }

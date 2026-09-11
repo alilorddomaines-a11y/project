@@ -1,6 +1,6 @@
 ﻿/**
  * extension/background/service_worker.js
- * Edge extension background service worker hosting the central controller.
+ * Hardened background service worker with concurrency locks and restart recovery.
  */
 
 import { createDefault15Workspaces } from '../../workspaces/WorkspaceConfig.js';
@@ -9,6 +9,7 @@ import { TaskQueue } from '../../tasks/TaskQueue.js';
 import { createStandardMilestoneTasks } from '../../tasks/TaskDefinitions.js';
 import { LovableAdapter } from '../../lovable/LovableAdapter.js';
 import { PromptBuilder } from '../../lovable/PromptBuilder.js';
+import { RecoveryEngine } from '../../state/RecoveryEngine.js';
 import { createInitialState, PROJECT_STATUS } from '../../state/StateSchema.js';
 
 let activeProject = null;
@@ -18,8 +19,8 @@ let adapter = null;
 let logs = [];
 let isRunning = false;
 let isPaused = false;
+let executionLock = false; // Concurrency guard against duplicate loops
 
-// Initialize extension behaviors
 chrome.runtime.onInstalled.addListener(() => {
   if (chrome.sidePanel?.setPanelBehavior) {
     chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
@@ -34,12 +35,42 @@ chrome.action.onClicked.addListener((tab) => {
 });
 
 async function loadInitialConfiguration() {
-  const stored = await chrome.storage.local.get(['workspaces', 'projectState', 'driverType']);
-  const wsList = stored.workspaces || createDefault15Workspaces();
+  const stored = await chrome.storage.local.get([
+    'workspaces',
+    'projectState',
+    'taskQueue',
+    'driverType',
+    'factoryStatus'
+  ]);
+
+  // 1. Workspaces configuration persistence
+  const wsList = stored.workspaces && stored.workspaces.length === 15
+    ? stored.workspaces
+    : createDefault15Workspaces();
   workspaceManager = new WorkspaceManager(wsList);
+
+  // 2. Lovable adapter setup
   adapter = new LovableAdapter(stored.driverType || 'simulation');
-  if (stored.projectState) {
+
+  // 3. TaskQueue and ProjectState restoration
+  if (stored.projectState && stored.taskQueue) {
     activeProject = stored.projectState;
+    taskQueue = TaskQueue.fromJSON(stored.taskQueue);
+
+    // Concurrency / crash recovery: handle any interrupted RUNNING task
+    const recovered = RecoveryEngine.reconstruct(activeProject, taskQueue.getAllTasks(), 'EXTENSION_RESTART');
+    activeProject = recovered.recoveredState;
+    taskQueue = new TaskQueue(recovered.tasks);
+
+    if (stored.factoryStatus === 'PAUSED' || activeProject.status === PROJECT_STATUS.PAUSED) {
+      isPaused = true;
+      isRunning = false;
+      activeProject.status = PROJECT_STATUS.PAUSED;
+    } else {
+      isPaused = false;
+    }
+
+    addLog('State and TaskQueue restored after extension wake/restart.', 'info');
   }
 }
 
@@ -58,8 +89,10 @@ async function saveState() {
   await chrome.storage.local.set({
     projectState: activeProject,
     taskQueue: taskQueue ? taskQueue.toJSON() : [],
-    workspaces: workspaceManager ? workspaceManager.toJSON() : []
+    workspaces: workspaceManager ? workspaceManager.toJSON() : [],
+    factoryStatus: isPaused ? 'PAUSED' : isRunning ? 'RUNNING' : 'IDLE'
   });
+
   chrome.runtime.sendMessage({
     type: 'STATE_UPDATED',
     state: activeProject,
@@ -69,87 +102,94 @@ async function saveState() {
 }
 
 async function runExecutionLoop() {
-  if (isRunning) return;
+  // Concurrency lock prevents duplicate loops
+  if (executionLock || isRunning) return;
+  executionLock = true;
   isRunning = true;
 
-  addLog('Execution loop started', 'info');
+  addLog('Execution loop acquired lock and started.', 'info');
 
-  while (isRunning && !isPaused) {
-    if (!activeProject || !taskQueue || !workspaceManager) break;
+  try {
+    while (isRunning && !isPaused) {
+      if (!activeProject || !taskQueue || !workspaceManager) break;
 
-    const currentWs = workspaceManager.getWorkspace(activeProject.current_workspace);
-    if (!currentWs) break;
+      const currentWs = workspaceManager.getWorkspace(activeProject.current_workspace);
+      if (!currentWs) break;
 
-    // 1. Evaluate canContinue
-    const canContinue = await adapter.canContinue(currentWs);
-    if (!canContinue) {
-      addLog(`Workspace ${currentWs.id} limit detected. Initiating rotation handoff.`, 'warn');
-      workspaceManager.markUnavailable(currentWs.id);
+      // 1. Evaluate canContinue
+      const canContinue = await adapter.canContinue(currentWs);
+      if (!canContinue) {
+        addLog(`Workspace ${currentWs.id} limit signal detected. Rotating to next workspace.`, 'warn');
+        workspaceManager.markUnavailable(currentWs.id);
 
-      const nextWs = workspaceManager.getNextWorkspace(currentWs.id);
-      if (!nextWs) {
-        addLog('All 15 workspaces are exhausted for this run. Pausing safely.', 'error');
-        activeProject.status = PROJECT_STATUS.PAUSED;
-        isPaused = true;
+        const nextWs = workspaceManager.getNextWorkspace(currentWs.id);
+        if (!nextWs) {
+          addLog('All 15 workspaces unavailable for this run. Pausing safely.', 'error');
+          activeProject.status = PROJECT_STATUS.PAUSED;
+          isPaused = true;
+          await saveState();
+          break;
+        }
+
+        activeProject.current_workspace = nextWs.id;
+        workspaceManager.markActive(nextWs.id);
+        addLog(`Handoff complete: active workspace is now ${nextWs.id}`, 'info');
+        await saveState();
+        await new Promise(r => setTimeout(r, 1000));
+        continue;
+      }
+
+      // 2. Fetch next executable task
+      const task = taskQueue.getNextExecutableTask();
+      if (!task) {
+        const remaining = taskQueue.getAllTasks().filter(t => t.status !== 'SUCCESS' && t.status !== 'SKIPPED').length;
+        if (remaining === 0) {
+          activeProject.status = PROJECT_STATUS.SUCCESS;
+          addLog('All tasks successfully completed!', 'success');
+        }
+        isRunning = false;
         await saveState();
         break;
       }
 
-      activeProject.current_workspace = nextWs.id;
-      workspaceManager.markActive(nextWs.id);
-      addLog(`Handed over to next enabled workspace: ${nextWs.id}`, 'info');
+      // 3. Mark task RUNNING
+      taskQueue.markRunning(task.id, currentWs.id);
+      activeProject.current_task = task.id;
+      activeProject.status = PROJECT_STATUS.RUNNING;
       await saveState();
-      await new Promise(r => setTimeout(r, 1000));
-      continue;
-    }
 
-    // 2. Fetch next task
-    const task = taskQueue.getNextExecutableTask();
-    if (!task) {
-      const remaining = taskQueue.getAllTasks().filter(t => t.status !== 'SUCCESS').length;
-      if (remaining === 0) {
-        activeProject.status = PROJECT_STATUS.SUCCESS;
-        addLog('All project tasks completed successfully!', 'success');
+      addLog(`Running ${task.id}: "${task.description}" on ${currentWs.id}...`, 'info');
+
+      const prompt = PromptBuilder.buildContinuationPrompt({
+        projectTitle: activeProject.book_title,
+        phase: activeProject.phase,
+        task,
+        completedTasks: activeProject.completed_tasks,
+        pendingTasks: activeProject.pending_tasks
+      });
+
+      try {
+        const result = await adapter.sendPrompt(prompt, { taskId: task.id, workspaceId: currentWs.id });
+        taskQueue.markSuccess(task.id, { output: result.output });
+        if (!activeProject.completed_tasks.includes(task.id)) {
+          activeProject.completed_tasks.push(task.id);
+        }
+        activeProject.pending_tasks = activeProject.pending_tasks.filter(id => id !== task.id);
+        addLog(`Task ${task.id} succeeded on ${currentWs.id}.`, 'success');
+        await saveState();
+      } catch (err) {
+        taskQueue.markFailed(task.id, err.message);
+        addLog(`Task ${task.id} failed: ${err.message}`, 'error');
+        await saveState();
       }
-      isRunning = false;
-      await saveState();
-      break;
-    }
 
-    // 3. Execute task
-    taskQueue.markRunning(task.id, currentWs.id);
-    activeProject.current_task = task.id;
-    activeProject.status = PROJECT_STATUS.RUNNING;
+      await new Promise(r => setTimeout(r, 1000));
+    }
+  } finally {
+    isRunning = false;
+    executionLock = false;
     await saveState();
-
-    addLog(`Running ${task.id}: "${task.description}" on ${currentWs.id}...`, 'info');
-
-    const prompt = PromptBuilder.buildContinuationPrompt({
-      projectTitle: activeProject.book_title,
-      phase: activeProject.phase,
-      task,
-      completedTasks: activeProject.completed_tasks,
-      pendingTasks: activeProject.pending_tasks
-    });
-
-    try {
-      const result = await adapter.sendPrompt(prompt, { taskId: task.id, workspaceId: currentWs.id });
-      taskQueue.markSuccess(task.id, { output: result.output });
-      activeProject.completed_tasks.push(task.id);
-      activeProject.pending_tasks = activeProject.pending_tasks.filter(id => id !== task.id);
-      addLog(`Task ${task.id} succeeded on ${currentWs.id}.`, 'success');
-      await saveState();
-    } catch (err) {
-      taskQueue.markFailed(task.id, err.message);
-      addLog(`Task ${task.id} failed: ${err.message}`, 'error');
-      await saveState();
-    }
-
-    await new Promise(r => setTimeout(r, 1200));
   }
-
-  isRunning = false;
-  await saveState();
 }
 
 chrome.runtime.onMessage.addListener((msg, sender, respond) => {

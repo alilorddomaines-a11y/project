@@ -1,9 +1,11 @@
 ﻿{
   "name": "kdp-coloring-book-factory",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "Autonomous KDP Coloring Book Factory Edge Extension and Orchestrator",
   "type": "module",
   "scripts": {
+    "test": "node tests/hardening_tests.js",
+    "test:hardening": "node tests/hardening_tests.js",
     "test:simulation": "node tests/run_simulation.js"
   }
 }
