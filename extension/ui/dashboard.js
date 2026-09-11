@@ -53,9 +53,24 @@ function renderAll() {
   renderWorkspaces();
   renderTaskQueue();
   renderLogs();
+  renderSettings();
+}
+
+function renderSettings() {
+  const driverSel = $('#driverSelect');
+  if (driverSel && !driverSel.matches(':focus') && currentData.driverType) {
+    driverSel.value = currentData.driverType;
+  }
 }
 
 function renderDashboard() {
+  const driverLabel = $('#activeDriverLabel');
+  if (driverLabel && currentData.driverType) {
+    const dName = currentData.driverType === 'browser' ? 'Edge Browser Driver' :
+                  currentData.driverType === 'mcp' ? 'Lovable MCP Driver' : 'Simulation Driver';
+    driverLabel.textContent = `Driver: ${dName}`;
+  }
+
   const state = currentData.state;
   const isExhausted = currentData.isExhausted || (state?.status === 'PAUSED' && currentData.workspaces.length > 0 && currentData.workspaces.every(w => !w.enabled || w.status === 'UNAVAILABLE_FOR_RUN'));
   const banner = $('#exhaustedBanner');
@@ -284,6 +299,24 @@ $('#btnSaveWorkspaces')?.addEventListener('click', async () => {
     fetchData();
   }
 });
+
+// Save Settings
+$('#btnSaveSettings')?.addEventListener('click', async () => {
+  const driverType = $('#driverSelect')?.value || 'simulation';
+  const maxRetries = Number($('#maxRetriesInput')?.value) || 3;
+
+  if (typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
+    await chrome.runtime.sendMessage({
+      type: 'SET_DRIVER',
+      driverType,
+      options: { maxRetries }
+    });
+    const dName = driverType === 'browser' ? 'Edge Browser Driver' : driverType === 'mcp' ? 'Lovable MCP Driver' : 'Simulation Driver';
+    alert(`Settings saved. Active Driver: ${dName}`);
+    fetchData();
+  }
+});
+
 
 // Listen for updates from service worker
 if (typeof chrome !== 'undefined' && chrome.runtime?.onMessage) {
