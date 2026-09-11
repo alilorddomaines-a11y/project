@@ -1,0 +1,49 @@
+﻿{
+  "manifest_version": 3,
+  "name": "KDP Coloring Book Factory",
+  "version": "1.0.0",
+  "description": "Production factory for Amazon KDP coloring books with 15-workspace Lovable rotation, canonical GitHub state, and PPTX output.",
+  "permissions": [
+    "storage",
+    "tabs",
+    "sidePanel",
+    "scripting",
+    "activeTab"
+  ],
+  "host_permissions": [
+    "https://lovable.dev/*",
+    "http://127.0.0.1:*/*"
+  ],
+  "background": {
+    "service_worker": "background/service_worker.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://lovable.dev/*"],
+      "js": ["content/lovable_bridge.js"],
+      "run_at": "document_idle",
+      "all_frames": false
+    }
+  ],
+  "action": {
+    "default_title": "KDP Coloring Book Factory",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "side_panel": {
+    "default_path": "ui/sidepanel.html"
+  },
+  "options_ui": {
+    "page": "ui/dashboard.html",
+    "open_in_tab": true
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  }
+}

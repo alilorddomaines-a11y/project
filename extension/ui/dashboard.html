@@ -1,0 +1,389 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>KDP Coloring Book Factory</title>
+  <link rel="stylesheet" href="dashboard.css">
+</head>
+<body>
+  <div class="app-container">
+    <!-- Sidebar Navigation -->
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-icon">🎨</div>
+        <div class="brand-text">
+          <h1>KDP FACTORY</h1>
+          <span class="badge badge-subtle">PRO EDITION</span>
+        </div>
+      </div>
+
+      <nav class="nav-menu">
+        <button class="nav-item active" data-tab="dashboard">
+          <span class="nav-icon">📊</span> Dashboard
+        </button>
+        <button class="nav-item" data-tab="projects">
+          <span class="nav-icon">📁</span> Projects
+        </button>
+        <button class="nav-item" data-tab="create-book">
+          <span class="nav-icon">✨</span> Create Book
+        </button>
+        <button class="nav-item" data-tab="workspaces">
+          <span class="nav-icon">🏢</span> Workspaces (15)
+        </button>
+        <button class="nav-item" data-tab="task-queue">
+          <span class="nav-icon">📋</span> Task Queue
+        </button>
+        <button class="nav-item" data-tab="assets">
+          <span class="nav-icon">🖼️</span> Assets
+        </button>
+        <button class="nav-item" data-tab="validation">
+          <span class="nav-icon">🔍</span> Validation & QC
+        </button>
+        <button class="nav-item" data-tab="output">
+          <span class="nav-icon">📦</span> Output (.pptx)
+        </button>
+        <button class="nav-item" data-tab="logs">
+          <span class="nav-icon">📜</span> System Logs
+        </button>
+        <button class="nav-item" data-tab="settings">
+          <span class="nav-icon">⚙️</span> Settings
+        </button>
+      </nav>
+
+      <div class="sidebar-footer">
+        <div class="driver-indicator">
+          <span class="status-dot online"></span>
+          <span id="activeDriverLabel">Driver: Simulation</span>
+        </div>
+        <div class="canonical-repo">
+          <small>Repo: alilorddomaines-a11y/project</small>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Main Content Area -->
+    <main class="main-content">
+      <!-- Top App Header -->
+      <header class="top-header">
+        <div class="header-left">
+          <h2 id="pageTitle">Production Dashboard</h2>
+          <span class="project-pill" id="activeProjectPill">No Active Project</span>
+        </div>
+        <div class="header-actions">
+          <button id="btnStart" class="btn btn-primary">▶ Start</button>
+          <button id="btnPause" class="btn btn-warning">⏸ Pause</button>
+          <button id="btnResume" class="btn btn-success">⏵ Resume</button>
+          <button id="btnStop" class="btn btn-danger">⏹ Stop</button>
+          <a href="https://github.com/alilorddomaines-a11y/project" target="_blank" class="btn btn-secondary">GitHub</a>
+          <a href="https://lovable.dev/" target="_blank" class="btn btn-secondary">Lovable</a>
+        </div>
+      </header>
+
+      <!-- TAB: DASHBOARD -->
+      <section id="tab-dashboard" class="tab-pane active">
+        <div class="stats-grid">
+          <div class="card stat-card">
+            <span class="stat-label">Book Project</span>
+            <div class="stat-value" id="statBookTitle">—</div>
+            <span class="stat-desc" id="statAudience">Audience: —</span>
+          </div>
+          <div class="card stat-card">
+            <span class="stat-label">Overall Progress</span>
+            <div class="stat-value" id="statProgressPercent">0%</div>
+            <div class="progress-bar-container">
+              <div class="progress-bar-fill" id="statProgressBar" style="width: 0%;"></div>
+            </div>
+          </div>
+          <div class="card stat-card">
+            <span class="stat-label">Active Workspace</span>
+            <div class="stat-value stat-highlight" id="statWorkspace">WS01</div>
+            <span class="badge badge-success" id="statWsStatus">ACTIVE</span>
+          </div>
+          <div class="card stat-card">
+            <span class="stat-label">Canonical Commit</span>
+            <div class="stat-value mono" id="statCommit">HEAD</div>
+            <span class="stat-desc">Branch: main</span>
+          </div>
+        </div>
+
+        <div class="details-grid">
+          <div class="card detail-card">
+            <h3>Current Execution Phase</h3>
+            <div class="phase-info">
+              <div class="info-row"><span>Phase:</span><strong id="infoPhase">BOOK_SPEC</strong></div>
+              <div class="info-row"><span>Current Task:</span><strong id="infoTask">TASK-001</strong></div>
+              <div class="info-row"><span>Factory Status:</span><span class="badge badge-info" id="infoStatus">IDLE</span></div>
+              <div class="info-row"><span>Assets Created:</span><strong id="infoAssets">0</strong></div>
+              <div class="info-row"><span>Validation Status:</span><span class="badge badge-neutral" id="infoValidation">PENDING</span></div>
+              <div class="info-row"><span>PPTX Status:</span><span class="badge badge-neutral" id="infoPptx">NOT GENERATED</span></div>
+            </div>
+          </div>
+
+          <div class="card detail-card">
+            <h3>Recent Activity Stream</h3>
+            <div class="mini-logs" id="miniLogsList">
+              <div class="log-placeholder">System initialized and ready.</div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- TAB: CREATE BOOK -->
+      <section id="tab-create-book" class="tab-pane">
+        <div class="card form-card">
+          <h3>Create New Coloring Book Specification</h3>
+          <form id="createBookForm">
+            <div class="form-section">
+              <h4>Book Information</h4>
+              <div class="form-row">
+                <div class="form-group">
+                  <label for="bookTitle">Book Title *</label>
+                  <input type="text" id="bookTitle" required value="Cute Forest Animals Coloring Book">
+                </div>
+                <div class="form-group">
+                  <label for="bookSubtitle">Subtitle</label>
+                  <input type="text" id="bookSubtitle" value="40 Relaxing Animal Illustrations for Kids">
+                </div>
+              </div>
+              <div class="form-row">
+                <div class="form-group">
+                  <label for="bookLanguage">Language</label>
+                  <select id="bookLanguage">
+                    <option value="en" selected>English</option>
+                    <option value="fr">French</option>
+                    <option value="es">Spanish</option>
+                    <option value="de">German</option>
+                    <option value="ar">Arabic</option>
+                  </select>
+                </div>
+                <div class="form-group">
+                  <label for="targetAge">Target Age Group</label>
+                  <select id="targetAge">
+                    <option value="3-5">Toddlers (3–5)</option>
+                    <option value="4-8" selected>Kids (4–8)</option>
+                    <option value="6-10">Kids (6–10)</option>
+                    <option value="8-12">Tweens (8–12)</option>
+                    <option value="adult">Adults</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            <div class="form-section">
+              <h4>Content & Structure</h4>
+              <div class="form-row">
+                <div class="form-group">
+                  <label for="pageCount">Number of Coloring Pages</label>
+                  <input type="number" id="pageCount" value="10" min="5" max="100">
+                </div>
+                <div class="form-group">
+                  <label for="trimSize">Trim Size</label>
+                  <select id="trimSize">
+                    <option value="8.5x11" selected>8.5 × 11 inches</option>
+                    <option value="8x10">8 × 10 inches</option>
+                    <option value="8.5x8.5">8.5 × 8.5 inches</option>
+                    <option value="8x8">8 × 8 inches</option>
+                    <option value="custom">Custom Size</option>
+                  </select>
+                </div>
+              </div>
+              <div class="form-row checkbox-row">
+                <label><input type="checkbox" id="chkBlankBacks" checked> Blank back after each coloring page</label>
+                <label><input type="checkbox" id="chkFrontMatter" checked> Include Title, Copyright & Intro</label>
+                <label><input type="checkbox" id="chkPageNumbers"> Add page numbering</label>
+              </div>
+            </div>
+
+            <div class="form-section">
+              <h4>Design & Illustration Style</h4>
+              <div class="form-row">
+                <div class="form-group">
+                  <label for="complexity">Complexity Preset</label>
+                  <select id="complexity">
+                    <option value="SIMPLE" selected>Simple (Bold, thick outlines)</option>
+                    <option value="MEDIUM">Medium (Moderate details)</option>
+                    <option value="DETAILED">Detailed (Intricate backgrounds)</option>
+                  </select>
+                </div>
+                <div class="form-group">
+                  <label for="theme">Theme Description</label>
+                  <input type="text" id="theme" value="Cute woodland creatures, baby bears, foxes, deer in forest settings">
+                </div>
+              </div>
+            </div>
+
+            <div class="form-actions">
+              <button type="submit" class="btn btn-primary btn-large">🚀 Initialize & Start Factory</button>
+            </div>
+          </form>
+        </div>
+      </section>
+
+      <!-- TAB: WORKSPACES -->
+      <section id="tab-workspaces" class="tab-pane">
+        <div class="card table-card">
+          <div class="card-header">
+            <h3>15 Configured Lovable Workspaces</h3>
+            <button id="btnSaveWorkspaces" class="btn btn-secondary">💾 Save Workspace Configuration</button>
+          </div>
+          <p class="section-desc">The orchestrator automatically rotates through your 15 authorized workspaces (WS01 → WS15) whenever a workspace legitimately reaches its plan limit.</p>
+          <div class="table-responsive">
+            <table class="data-table" id="workspacesTable">
+              <thead>
+                <tr>
+                  <th>Order</th>
+                  <th>Workspace ID</th>
+                  <th>Workspace Name</th>
+                  <th>Status</th>
+                  <th>Enabled</th>
+                  <th>Direct Workspace URL</th>
+                </tr>
+              </thead>
+              <tbody id="workspacesTbody">
+                <!-- Populated via JS -->
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- TAB: TASK QUEUE -->
+      <section id="tab-task-queue" class="tab-pane">
+        <div class="card table-card">
+          <div class="card-header">
+            <h3>Task Queue & DAG Pipeline</h3>
+            <span class="badge badge-info" id="queueCountBadge">0 Tasks</span>
+          </div>
+          <div class="table-responsive">
+            <table class="data-table" id="taskQueueTable">
+              <thead>
+                <tr>
+                  <th>Task ID</th>
+                  <th>Type</th>
+                  <th>Description</th>
+                  <th>Priority</th>
+                  <th>Status</th>
+                  <th>Assigned WS</th>
+                  <th>Attempts</th>
+                </tr>
+              </thead>
+              <tbody id="taskQueueTbody">
+                <!-- Populated via JS -->
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- TAB: ASSETS -->
+      <section id="tab-assets" class="tab-pane">
+        <div class="card gallery-card">
+          <h3>Generated Illustration Assets</h3>
+          <p class="section-desc">Coloring illustrations collected and generated across workspaces. Each asset passes dimension, format, and grayscale validation.</p>
+          <div class="assets-grid" id="assetsGrid">
+            <div class="empty-state">No assets generated yet. Start a project to begin.</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- TAB: VALIDATION -->
+      <section id="tab-validation" class="tab-pane">
+        <div class="card report-card">
+          <h3>Amazon KDP Quality Control & Validation</h3>
+          <p class="section-desc">Automated validation metrics ensuring print-readiness for Amazon KDP.</p>
+          <div class="qc-checklist">
+            <div class="qc-item pass"><span class="qc-icon">✔</span> Exact Trim Size Dimensions (Inches to EMU conversion)</div>
+            <div class="qc-item pass"><span class="qc-icon">✔</span> Aspect Ratio Preserved (No image stretching)</div>
+            <div class="qc-item pass"><span class="qc-icon">✔</span> Pure Black & White Compliance (No colored pixels)</div>
+            <div class="qc-item pass"><span class="qc-icon">✔</span> Contrast Threshold Verification (No blank/washed pages)</div>
+            <div class="qc-item pass"><span class="qc-icon">✔</span> Duplicate Illustration Screening (Perceptual hash dHash)</div>
+            <div class="qc-item pass"><span class="qc-icon">✔</span> Margin & Bleed Safety Boundaries (0.375" minimum margins)</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- TAB: OUTPUT -->
+      <section id="tab-output" class="tab-pane">
+        <div class="card output-card">
+          <h3>Final Output Package</h3>
+          <p class="section-desc">Editable Microsoft PowerPoint (.pptx) interior and validation reports.</p>
+          <div class="output-files">
+            <div class="file-item">
+              <div class="file-icon">📊</div>
+              <div class="file-details">
+                <strong id="outPptxName">Cute_Forest_Animals.pptx</strong>
+                <small>Ready for KDP upload or custom layout editing</small>
+              </div>
+              <button class="btn btn-primary" id="btnDownloadPptx">Download PPTX</button>
+            </div>
+            <div class="file-item">
+              <div class="file-icon">📋</div>
+              <div class="file-details">
+                <strong>VALIDATION_REPORT.md</strong>
+                <small>Comprehensive KDP compliance audit summary</small>
+              </div>
+              <button class="btn btn-secondary" id="btnDownloadReport">View Report</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- TAB: LOGS -->
+      <section id="tab-logs" class="tab-pane">
+        <div class="card logs-card">
+          <div class="card-header">
+            <h3>Structured System Logs</h3>
+            <button id="btnClearLogs" class="btn btn-secondary btn-small">Clear Logs</button>
+          </div>
+          <div class="logs-stream" id="logsStream">
+            <!-- Populated via JS -->
+          </div>
+        </div>
+      </section>
+
+      <!-- TAB: SETTINGS -->
+      <section id="tab-settings" class="tab-pane">
+        <div class="card form-card">
+          <h3>System & Integration Settings</h3>
+          <div class="form-section">
+            <h4>Canonical Git Repository</h4>
+            <div class="form-row">
+              <div class="form-group">
+                <label>Repository Name</label>
+                <input type="text" value="alilorddomaines-a11y/project" disabled>
+              </div>
+              <div class="form-group">
+                <label>Branch</label>
+                <input type="text" value="main" disabled>
+              </div>
+            </div>
+          </div>
+          <div class="form-section">
+            <h4>Lovable Execution Driver</h4>
+            <div class="form-row">
+              <div class="form-group">
+                <label for="driverSelect">Active Driver</label>
+                <select id="driverSelect">
+                  <option value="simulation" selected>Simulation Driver (Zero credits spent — Verified)</option>
+                  <option value="browser">Edge Browser Driver (Native Edge DOM Bridge)</option>
+                  <option value="mcp" disabled>Lovable MCP Driver (Disabled until configured)</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label for="maxRetriesInput">Max Retries per Task</label>
+                <input type="number" id="maxRetriesInput" value="3" min="1" max="10">
+              </div>
+            </div>
+          </div>
+          <div class="form-actions">
+            <button id="btnSaveSettings" class="btn btn-primary">Save Settings</button>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script type="module" src="dashboard.js"></script>
+</body>
+</html>

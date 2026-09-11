@@ -1,0 +1,50 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>KDP Factory Panel</title>
+  <link rel="stylesheet" href="dashboard.css">
+  <style>
+    body { padding: 14px; height: 100vh; overflow-y: auto; }
+    .panel-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+    .panel-header h1 { font-size: 15px; font-weight: 700; }
+    .quick-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 16px 0; }
+  </style>
+</head>
+<body>
+  <div class="panel-header">
+    <h1>🎨 KDP Factory</h1>
+    <span class="badge badge-info" id="pStatus">IDLE</span>
+  </div>
+
+  <div class="card" style="margin-bottom: 12px;">
+    <span class="stat-label">Project</span>
+    <h3 id="pTitle" style="font-size: 14px; margin: 4px 0;">No Active Project</h3>
+    <div class="progress-bar-container">
+      <div class="progress-bar-fill" id="pProgress" style="width: 0%;"></div>
+    </div>
+  </div>
+
+  <div class="card" style="margin-bottom: 12px;">
+    <div class="info-row"><span>Workspace:</span><strong id="pWorkspace">WS01</strong></div>
+    <div class="info-row"><span>Current Task:</span><strong id="pTask">—</strong></div>
+  </div>
+
+  <div class="quick-actions">
+    <button id="btnPResume" class="btn btn-success btn-small">▶ Resume</button>
+    <button id="btnPPause" class="btn btn-warning btn-small">⏸ Pause</button>
+    <button id="btnPStop" class="btn btn-danger btn-small">⏹ Stop</button>
+    <button id="btnOpenFull" class="btn btn-primary btn-small">🖥 Full Dashboard</button>
+  </div>
+
+  <div class="card">
+    <span class="stat-label">Live Logs</span>
+    <div class="logs-stream" id="pLogs" style="height: 160px; font-size: 11px;">
+      <div class="log-entry">Panel ready.</div>
+    </div>
+  </div>
+
+  <script type="module" src="sidepanel.js"></script>
+</body>
+</html>

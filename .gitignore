@@ -5,3 +5,5 @@ media/
 output/
 .DS_Store
 Thumbs.db
+gcm-diagnose.log
+push_out.txt
