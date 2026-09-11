@@ -1,10 +1,10 @@
 {
   "project_id": "kdp_sim_001",
   "book_title": "Cute Forest Animals Test Book",
-  "status": "RUNNING",
+  "status": "SUCCESS",
   "phase": "BOOK_SPEC",
-  "current_task": "TASK-005",
-  "current_workspace": "WS05",
+  "current_task": null,
+  "current_workspace": "WS06",
   "completed_tasks": [
     "TASK-001",
     "TASK-002",
@@ -16,7 +16,7 @@
   "failed_tasks": [],
   "assets_created": [],
   "assets_failed": [],
-  "last_commit": "3fdee857164b2463c436f2cdc45516508c951e45",
-  "last_successful_operation": "Workspace WS05 limit reached — Handover initiated",
-  "timestamp": "2026-09-11T00:40:25.864Z"
+  "last_commit": "d487fd5d77d0390e12c9d7852864e1119c144b3c",
+  "last_successful_operation": "All tasks completed successfully",
+  "timestamp": "2026-09-11T00:40:26.494Z"
 }
